@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "Running theme token check..."
+npm --prefix src/frontend/web run theme:check

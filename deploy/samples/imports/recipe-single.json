@@ -1,0 +1,24 @@
+{
+  "payloadType": "recipe",
+  "payload": {
+    "id": "",
+    "name": "Greek Yogurt Berry Bowl",
+    "description": "Fast high-protein breakfast.",
+    "ingredients": [
+      "Greek yogurt",
+      "Mixed berries",
+      "Chia seeds",
+      "Honey"
+    ],
+    "steps": [
+      "Add yogurt to a bowl.",
+      "Top with berries and chia seeds.",
+      "Drizzle honey and serve."
+    ],
+    "prepMinutes": 5,
+    "cookMinutes": 0,
+    "tags": ["breakfast", "high-protein"],
+    "createdAt": "0001-01-01T00:00:00+00:00",
+    "updatedAt": "0001-01-01T00:00:00+00:00"
+  }
+}

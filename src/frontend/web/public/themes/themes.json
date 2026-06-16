@@ -1,0 +1,15 @@
+{
+  "themes": [
+    {
+      "id": "dark",
+      "label": "Dark",
+      "cssFile": "/themes/dark.css",
+      "isDefault": true
+    },
+    {
+      "id": "light",
+      "label": "Light",
+      "cssFile": "/themes/light.css"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+services:
+  health-hq:
+    image: ${IMAGE_NAME:-health-hq:local}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: health-hq
+    restart: unless-stopped
+    ports:
+      - "18080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Data__DataDirectory=/app/data
+      - Data__DatabaseFileName=healthhq.db
+      - Data__KeyDirectoryName=keys
+      - Strava__EnabledByDefault=${STRAVA_ENABLED_BY_DEFAULT:-false}
+      - Strava__ClientId=${STRAVA_CLIENT_ID}
+      - Strava__ClientSecret=${STRAVA_CLIENT_SECRET}
+      - Strava__RedirectUri=${STRAVA_REDIRECT_URI}
+      - Strava__PollingIntervalMinutes=30
+    volumes:
+      - healthhq-data:/app/data
+
+  garmin-db:
+    image: python:3.12-alpine
+    container_name: garmin-db
+    restart: unless-stopped
+    environment:
+      - HOME=/app/data/garmin
+      - GARMIN_SYNC_INTERVAL_MINUTES=${GARMIN_SYNC_INTERVAL_MINUTES:-60}
+      - GARMIN_BACKOFF_STEP_MINUTES=${GARMIN_BACKOFF_STEP_MINUTES:-15}
+      - GARMIN_MAX_BACKOFF_MINUTES=${GARMIN_MAX_BACKOFF_MINUTES:-360}
+    volumes:
+      - healthhq-data:/app/data
+      - ./garmin/entrypoint.sh:/entrypoint.sh:ro
+    command: ["sh", "/entrypoint.sh"]
+
+volumes:
+  healthhq-data:

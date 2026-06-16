@@ -1,0 +1,51 @@
+{
+  "payloadType": "recipes",
+  "payload": [
+    {
+      "id": "",
+      "name": "Chicken Rice Bowl",
+      "description": "Simple meal prep lunch.",
+      "ingredients": [
+        "Chicken breast",
+        "Brown rice",
+        "Spinach",
+        "Olive oil",
+        "Lemon juice"
+      ],
+      "steps": [
+        "Cook rice according to package directions.",
+        "Season and pan-cook chicken until done.",
+        "Assemble rice, spinach, and sliced chicken.",
+        "Finish with olive oil and lemon juice."
+      ],
+      "prepMinutes": 15,
+      "cookMinutes": 20,
+      "tags": ["lunch", "meal-prep"],
+      "createdAt": "0001-01-01T00:00:00+00:00",
+      "updatedAt": "0001-01-01T00:00:00+00:00"
+    },
+    {
+      "id": "",
+      "name": "Salmon and Broccoli Plate",
+      "description": "Balanced weeknight dinner.",
+      "ingredients": [
+        "Salmon fillet",
+        "Broccoli",
+        "Rice",
+        "Garlic",
+        "Olive oil"
+      ],
+      "steps": [
+        "Cook rice.",
+        "Bake salmon with garlic and olive oil.",
+        "Steam broccoli until tender.",
+        "Plate and serve."
+      ],
+      "prepMinutes": 10,
+      "cookMinutes": 25,
+      "tags": ["dinner", "high-protein"],
+      "createdAt": "0001-01-01T00:00:00+00:00",
+      "updatedAt": "0001-01-01T00:00:00+00:00"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HealthHq.Modules.Nutrition</AssemblyName>
+    <RootNamespace>HealthHq.Modules.Nutrition</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Shared/Shared.Contracts/Shared.Contracts.csproj" />
+    <ProjectReference Include="../../Shared/Shared.Infrastructure/Shared.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

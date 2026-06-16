@@ -1,0 +1,9 @@
+{
+  "payloadType": "recipe",
+  "payload": {
+    "name": "Peanut Butter Toast",
+    "ingredients": ["Bread", "Peanut butter"],
+    "steps": ["Toast bread.", "Spread peanut butter."],
+    "tags": []
+  }
+}

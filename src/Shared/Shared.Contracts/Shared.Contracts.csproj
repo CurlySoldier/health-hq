@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HealthHq.Shared.Contracts</AssemblyName>
+    <RootNamespace>HealthHq.Shared.Contracts</RootNamespace>
+  </PropertyGroup>
+</Project>

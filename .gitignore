@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+.idea/
+node_modules/
+dist/
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
+src/App.Host/wwwroot/

@@ -1,0 +1,721 @@
+openapi: 3.0.3
+info:
+  title: Health HQ API
+  version: 0.1.0
+  description: API spec for Health HQ, including Strava and Garmin ingestion endpoints.
+servers:
+  - url: http://localhost:18080
+paths:
+  /api/health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard summary
+      responses:
+        '200':
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummary'
+
+  /api/training/acwr:
+    get:
+      tags: [Training]
+      summary: Get acute/chronic workload ratio
+      responses:
+        '200':
+          description: ACWR details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcwrResponse'
+
+  /api/training/plans:
+    get:
+      tags: [Training]
+      summary: List training plans
+      responses:
+        '200':
+          description: Training plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrainingPlan'
+    post:
+      tags: [Training]
+      summary: Create or upsert a training plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingPlan'
+      responses:
+        '200':
+          description: Saved plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingPlan'
+
+  /api/nutrition/meal-plans:
+    get:
+      tags: [Nutrition]
+      summary: List meal plans
+      responses:
+        '200':
+          description: Meal plans
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MealPlan'
+    post:
+      tags: [Nutrition]
+      summary: Create or upsert a meal plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MealPlan'
+      responses:
+        '200':
+          description: Saved meal plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MealPlan'
+
+  /api/nutrition/discounts:
+    get:
+      tags: [Nutrition]
+      summary: List discount records
+      responses:
+        '200':
+          description: Discounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DiscountRecord'
+    post:
+      tags: [Nutrition]
+      summary: Create or upsert a discount record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscountRecord'
+      responses:
+        '200':
+          description: Saved discount
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscountRecord'
+
+  /api/shopping/generate:
+    post:
+      tags: [Shopping]
+      summary: Generate a shopping list from ingredients
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShoppingListRequest'
+      responses:
+        '200':
+          description: Generated shopping list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingList'
+
+  /api/shopping/lists:
+    get:
+      tags: [Shopping]
+      summary: List shopping lists
+      responses:
+        '200':
+          description: Shopping lists
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ShoppingList'
+
+  /api/vitality/summary:
+    get:
+      tags: [Vitality]
+      summary: Get weekly vitality summary
+      responses:
+        '200':
+          description: Vitality summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VitalitySummary'
+
+  /api/vitality/recalculate:
+    post:
+      tags: [Vitality]
+      summary: Recalculate vitality records from recent activity
+      responses:
+        '200':
+          description: Recalculation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecalculateResponse'
+
+  /api/vitality/heart-rate-zones:
+    get:
+      tags: [Vitality]
+      summary: Estimate heart-rate zones by age
+      parameters:
+        - in: query
+          name: age
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Heart-rate zone estimate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartRateZonesResponse'
+
+  /api/body-metrics:
+    get:
+      tags: [BodyMetrics]
+      summary: List body metric entries
+      responses:
+        '200':
+          description: Body metric entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BodyMetricEntry'
+    post:
+      tags: [BodyMetrics]
+      summary: Create or upsert a body metric entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BodyMetricInput'
+      responses:
+        '200':
+          description: Saved body metric entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BodyMetricEntry'
+
+  /api/vital-signs:
+    get:
+      tags: [BodyMetrics]
+      summary: List blood pressure and pulse readings
+      responses:
+        '200':
+          description: Vital sign entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VitalSignEntry'
+    post:
+      tags: [BodyMetrics]
+      summary: Create a blood pressure and pulse reading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VitalSignInput'
+      responses:
+        '200':
+          description: Saved vital sign entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VitalSignEntry'
+        '400':
+          description: Invalid vital sign values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /api/imports:
+    get:
+      tags: [Imports]
+      summary: List imported payload metadata
+      responses:
+        '200':
+          description: Imported payloads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ImportedPayload'
+    post:
+      tags: [Imports]
+      summary: Import a JSON payload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportRequest'
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/MealPlan'
+                  - $ref: '#/components/schemas/TrainingPlan'
+                  - $ref: '#/components/schemas/ImportCountResponse'
+                  - $ref: '#/components/schemas/GenericImportResponse'
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /api/ingestion/providers:
+    get:
+      tags: [Ingestion]
+      summary: List available ingestion providers
+      responses:
+        '200':
+          description: Provider keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /api/ingestion/strava/connect-url:
+    get:
+      tags: [Ingestion]
+      summary: Get Strava OAuth authorize URL
+      responses:
+        '200':
+          description: Authorize URL payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StravaConnectUrlResponse'
+
+  /api/ingestion/strava/connect:
+    get:
+      tags: [Ingestion]
+      summary: Redirect to Strava OAuth authorize URL
+      responses:
+        '302':
+          description: Redirect to Strava
+
+  /api/ingestion/strava/oauth/callback:
+    get:
+      tags: [Ingestion]
+      summary: Strava OAuth callback
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to app root
+
+  /api/ingestion/strava/sync:
+    post:
+      tags: [Ingestion]
+      summary: Trigger Strava sync now
+      responses:
+        '200':
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResult'
+
+  /api/ingestion/strava/status:
+    get:
+      tags: [Ingestion]
+      summary: Get Strava connection and sync status
+      responses:
+        '200':
+          description: Strava status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StravaStatusResponse'
+
+  /api/ingestion/garmin/settings:
+    post:
+      tags: [Ingestion]
+      summary: Save Garmin credentials/settings (password is write-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GarminSettingsUpsertRequest'
+      responses:
+        '200':
+          description: Save result (redacted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GarminSettingsSavedResponse'
+
+  /api/ingestion/garmin/sync:
+    post:
+      tags: [Ingestion]
+      summary: Trigger Garmin import sync now
+      responses:
+        '200':
+          description: Garmin import result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResult'
+
+  /api/ingestion/garmin/status:
+    get:
+      tags: [Ingestion]
+      summary: Get Garmin config/sync/import status (redacted)
+      responses:
+        '200':
+          description: Garmin status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GarminStatusResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+
+    DashboardSummary:
+      type: object
+      properties:
+        activityCountLast7Days: { type: integer }
+        acuteLoad: { type: number }
+        chronicLoad: { type: number }
+        acwr: { type: number }
+        vitalityPointsThisWeek: { type: integer }
+        latestBmi: { type: number, nullable: true }
+        latestWeightKg: { type: number, nullable: true }
+        latestWeightCategory: { type: string, nullable: true }
+        activeMealPlans: { type: integer }
+        activeDiscounts: { type: integer }
+      required:
+        - activityCountLast7Days
+        - acuteLoad
+        - chronicLoad
+        - acwr
+        - vitalityPointsThisWeek
+        - activeMealPlans
+        - activeDiscounts
+
+    AcwrResponse:
+      type: object
+      properties:
+        acute: { type: number }
+        chronic: { type: number }
+        acwr: { type: number }
+        risk: { type: string }
+      required: [acute, chronic, acwr, risk]
+
+    TrainingPlan:
+      type: object
+      properties:
+        id: { type: string }
+        weekKey: { type: string }
+        payloadJson: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, weekKey, payloadJson, createdAt]
+
+    MealPlan:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        payloadJson: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, name, payloadJson, createdAt]
+
+    DiscountRecord:
+      type: object
+      properties:
+        id: { type: string }
+        storeName: { type: string }
+        itemName: { type: string }
+        originalPrice: { type: number }
+        discountedPrice: { type: number }
+        unit: { type: string }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - storeName
+        - itemName
+        - originalPrice
+        - discountedPrice
+        - unit
+        - validFrom
+        - validTo
+        - createdAt
+
+    ShoppingListRequest:
+      type: object
+      properties:
+        name: { type: string }
+        ingredients:
+          type: array
+          items: { type: string }
+      required: [name, ingredients]
+
+    ShoppingList:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        payloadJson: { type: string }
+        estimatedTotal: { type: number }
+        estimatedSavings: { type: number }
+        createdAt: { type: string, format: date-time }
+      required: [id, name, payloadJson, estimatedTotal, estimatedSavings, createdAt]
+
+    VitalitySummary:
+      type: object
+      properties:
+        weeklyPoints: { type: integer }
+        target: { type: integer }
+        remaining: { type: integer }
+      required: [weeklyPoints, target, remaining]
+
+    RecalculateResponse:
+      type: object
+      properties:
+        updated: { type: integer }
+      required: [updated]
+
+    HeartRateZonesResponse:
+      type: object
+      properties:
+        age: { type: integer }
+        estimatedMaxHeartRate: { type: integer }
+        zones:
+          type: object
+          properties:
+            intensity60: { type: number }
+            intensity70: { type: number }
+            intensity80: { type: number }
+          required: [intensity60, intensity70, intensity80]
+      required: [age, estimatedMaxHeartRate, zones]
+
+    BodyMetricInput:
+      type: object
+      properties:
+        day: { type: string, format: date }
+        heightCm: { type: number }
+        weightKg: { type: number }
+      required: [day, heightCm, weightKg]
+
+    BodyMetricEntry:
+      type: object
+      properties:
+        id: { type: string }
+        day: { type: string, format: date }
+        heightCm: { type: number }
+        weightKg: { type: number }
+        bmi: { type: number }
+        category: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, day, heightCm, weightKg, bmi, category, createdAt]
+
+    VitalSignInput:
+      type: object
+      properties:
+        measuredAt: { type: string, format: date-time }
+        systolic: { type: integer }
+        diastolic: { type: integer }
+        pulse: { type: integer }
+      required: [measuredAt, systolic, diastolic, pulse]
+
+    VitalSignEntry:
+      type: object
+      properties:
+        id: { type: string }
+        measuredAt: { type: string, format: date-time }
+        systolic: { type: integer }
+        diastolic: { type: integer }
+        pulse: { type: integer }
+        createdAt: { type: string, format: date-time }
+      required: [id, measuredAt, systolic, diastolic, pulse, createdAt]
+
+    ImportedPayload:
+      type: object
+      properties:
+        id: { type: string }
+        payloadType: { type: string }
+        payloadJson: { type: string }
+        importedAt: { type: string, format: date-time }
+      required: [id, payloadType, payloadJson, importedAt]
+
+    ImportRequest:
+      type: object
+      properties:
+        payloadType:
+          type: string
+          description: Common values are meal-plan, discount, recipe, recipes, training-plan.
+        payload:
+          type: object
+          additionalProperties: true
+      required: [payloadType, payload]
+
+    ImportCountResponse:
+      type: object
+      properties:
+        imported: { type: integer }
+      required: [imported]
+
+    GenericImportResponse:
+      type: object
+      properties:
+        imported: { type: boolean }
+        payloadId: { type: string }
+      required: [imported, payloadId]
+
+    ErrorMessage:
+      type: object
+      properties:
+        message: { type: string }
+      required: [message]
+
+    SyncResult:
+      type: object
+      properties:
+        importedCount: { type: integer }
+        lastActivityAt: { type: string, format: date-time }
+      required: [importedCount, lastActivityAt]
+
+    SyncRun:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        status: { type: string }
+        importedCount: { type: integer }
+        error: { type: string, nullable: true }
+      required: [id, provider, startedAt, status, importedCount]
+
+    StravaConnectUrlResponse:
+      type: object
+      properties:
+        provider: { type: string }
+        url: { type: string }
+        state: { type: string }
+      required: [provider, url, state]
+
+    StravaStatusResponse:
+      type: object
+      properties:
+        connected: { type: boolean }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        lastSyncedAt: { type: string, format: date-time, nullable: true }
+        recentRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncRun'
+      required: [connected, recentRuns]
+
+    GarminSettingsUpsertRequest:
+      type: object
+      properties:
+        username: { type: string }
+        password:
+          type: string
+          nullable: true
+          description: Optional on update; retained if omitted.
+        startDate:
+          type: string
+          nullable: true
+          description: Accepts yyyy-MM-dd or MM/dd/yyyy.
+        downloadLatestActivities:
+          type: integer
+          nullable: true
+      required: [username]
+
+    GarminSettingsSavedResponse:
+      type: object
+      properties:
+        configured: { type: boolean }
+        hasUsername: { type: boolean }
+        hasPassword: { type: boolean }
+        credentialsUpdatedAt: { type: string, format: date-time }
+      required: [configured, hasUsername, hasPassword, credentialsUpdatedAt]
+
+    GarminStatusResponse:
+      type: object
+      properties:
+        configured: { type: boolean }
+        hasUsername: { type: boolean }
+        hasPassword: { type: boolean }
+        credentialsUpdatedAt: { type: string, format: date-time, nullable: true }
+        activitiesDatabaseExists: { type: boolean }
+        activitiesDatabaseLastWriteUtc: { type: string, format: date-time, nullable: true }
+        lastImportedAt: { type: string, format: date-time, nullable: true }
+        recentRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncRun'
+      required:
+        - configured
+        - hasUsername
+        - hasPassword
+        - activitiesDatabaseExists
+        - recentRuns
