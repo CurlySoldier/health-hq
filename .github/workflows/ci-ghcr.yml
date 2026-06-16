@@ -52,11 +52,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image name
+        run: |
+          echo "IMAGE_NAME=$(echo \"${GITHUB_REPOSITORY}\" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Build and push container image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ toLower(github.repository) }}:main
-            ghcr.io/${{ toLower(github.repository) }}:sha-${{ github.sha }}
+            ghcr.io/${{ env.IMAGE_NAME }}:main
+            ghcr.io/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
