@@ -23,6 +23,9 @@ services:
 
   garmin-db:
     image: ${GARMIN_DB_IMAGE_NAME:-ghcr.io/curlysoldier/health-hq-garmin-db:main}
+    build:
+      context: ..
+      dockerfile: deploy/garmin/Dockerfile
     container_name: garmin-db
     restart: unless-stopped
     environment:

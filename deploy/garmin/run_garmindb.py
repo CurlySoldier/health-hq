@@ -7,7 +7,7 @@ import sys
 
 import fitfile
 
-from garmindb import File, MonitoringInfo
+from garmindb.garmindb import File, MonitoringInfo
 from garmindb.monitoring_fit_file_processor import MonitoringFitFileProcessor
 
 
@@ -74,11 +74,11 @@ def _patched_write_monitoring_info_entry(self, fit_file, message_fields):
         }
 
         cycles_to_distance = message_fields.cycles_to_distance
-        if isinstance(cycles_to_distance, tuple) and index < len(cycles_to_distance):
+        if isinstance(cycles_to_distance, (tuple, list)) and index < len(cycles_to_distance):
             entry["cycles_to_distance"] = cycles_to_distance[index]
 
         cycles_to_calories = message_fields.cycles_to_calories
-        if isinstance(cycles_to_calories, tuple) and index < len(cycles_to_calories):
+        if isinstance(cycles_to_calories, (tuple, list)) and index < len(cycles_to_calories):
             entry["cycles_to_calories"] = cycles_to_calories[index]
 
         MonitoringInfo.s_insert_or_update(self.garmin_mon_db_session, entry)
