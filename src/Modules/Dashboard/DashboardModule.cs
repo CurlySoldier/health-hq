@@ -392,13 +392,53 @@ public static class DashboardModule
             return "unknown";
         }
 
-        return type.Trim().ToLowerInvariant() switch
+        var normalized = ExtractActivityTypeToken(type);
+
+        return normalized switch
         {
             "racket" => "squash",
             "racquet" => "squash",
             "racquet sport" => "squash",
-            _ => type.Trim()
+            _ => normalized
         };
+    }
+
+    private static string ExtractActivityTypeToken(string type)
+    {
+        var candidate = type.Trim();
+        if (candidate.Length == 0)
+        {
+            return "unknown";
+        }
+
+        if (candidate.Contains("UnknownEnumValue", StringComparison.OrdinalIgnoreCase))
+        {
+            return "unknown";
+        }
+
+        if (candidate.StartsWith('<') && candidate.EndsWith('>'))
+        {
+            candidate = candidate[1..^1].Trim();
+        }
+
+        var colonIndex = candidate.IndexOf(':');
+        if (colonIndex >= 0)
+        {
+            candidate = candidate[..colonIndex].Trim();
+        }
+
+        var lastDotIndex = candidate.LastIndexOf('.');
+        if (lastDotIndex >= 0 && lastDotIndex < candidate.Length - 1)
+        {
+            candidate = candidate[(lastDotIndex + 1)..].Trim();
+        }
+
+        if (candidate.Length == 0 || int.TryParse(candidate, out _))
+        {
+            return "unknown";
+        }
+
+        return candidate.ToLowerInvariant();
     }
 
     private static double GetEffectiveDurationMinutes(ActivityRecord activity)

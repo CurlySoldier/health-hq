@@ -92,13 +92,53 @@ public sealed class GarminExternalActivityMapper : IExternalActivityMapper<Garmi
             return "unknown";
         }
 
-        return activityType.Trim().ToLowerInvariant() switch
+        var normalized = ExtractActivityTypeToken(activityType);
+
+        return normalized switch
         {
             "racket" => "squash",
             "racquet" => "squash",
             "racquet sport" => "squash",
-            _ => activityType.Trim()
+            _ => normalized
         };
+    }
+
+    private static string ExtractActivityTypeToken(string activityType)
+    {
+        var candidate = activityType.Trim();
+        if (candidate.Length == 0)
+        {
+            return "unknown";
+        }
+
+        if (candidate.Contains("UnknownEnumValue", StringComparison.OrdinalIgnoreCase))
+        {
+            return "unknown";
+        }
+
+        if (candidate.StartsWith('<') && candidate.EndsWith('>'))
+        {
+            candidate = candidate[1..^1].Trim();
+        }
+
+        var colonIndex = candidate.IndexOf(':');
+        if (colonIndex >= 0)
+        {
+            candidate = candidate[..colonIndex].Trim();
+        }
+
+        var lastDotIndex = candidate.LastIndexOf('.');
+        if (lastDotIndex >= 0 && lastDotIndex < candidate.Length - 1)
+        {
+            candidate = candidate[(lastDotIndex + 1)..].Trim();
+        }
+
+        if (candidate.Length == 0 || int.TryParse(candidate, out _))
+        {
+            return "unknown";
+        }
+
+        return candidate.ToLowerInvariant();
     }
 
     private static string BuildName(GarminActivityProjection source)
