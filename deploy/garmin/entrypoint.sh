@@ -24,12 +24,12 @@ run_sync() {
 
   if [ "${mode}" = "initial" ]; then
     set +e
-    garmindb_cli.py --all --download --import --analyze >"${LOG_FILE}" 2>&1
+    python3 /run_garmindb.py --all --download --import --analyze >"${LOG_FILE}" 2>&1
     code="$?"
     set -e
   else
     set +e
-    garmindb_cli.py --all --download --import --analyze --latest >"${LOG_FILE}" 2>&1
+    python3 /run_garmindb.py --all --download --import --analyze --latest >"${LOG_FILE}" 2>&1
     code="$?"
     set -e
   fi
