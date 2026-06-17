@@ -37,8 +37,6 @@ jobs:
       - name: Build
         run: dotnet build src/App.Host/App.Host.csproj -c Release --no-restore
 
-      - name: Build Garmin DB container image
-        run: docker build -f deploy/garmin/Dockerfile deploy
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
