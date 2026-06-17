@@ -302,98 +302,12 @@ type ThemeManifest = {
   themes: ThemeOption[];
 };
 
-type ImportTemplate = {
-  id: string;
-  label: string;
-  payloadType: string;
-  payload: unknown;
-};
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const THEME_STORAGE_KEY = "health-hq-theme";
 const THEME_LINK_ID = "theme-stylesheet";
 const FALLBACK_THEMES: ThemeOption[] = [
   { id: "dark", label: "Dark", cssFile: "/themes/dark.css", isDefault: true },
   { id: "light", label: "Light", cssFile: "/themes/light.css" }
-];
-
-const IMPORT_TEMPLATES: ImportTemplate[] = [
-  {
-    id: "recipe-single",
-    label: "Recipe (single)",
-    payloadType: "recipe",
-    payload: {
-      id: "",
-      name: "Greek Yogurt Berry Bowl",
-      description: "Fast high-protein breakfast.",
-      ingredients: ["Greek yogurt", "Mixed berries", "Chia seeds", "Honey"],
-      steps: ["Add yogurt to a bowl.", "Top with berries and chia seeds.", "Drizzle honey and serve."],
-      prepMinutes: 5,
-      cookMinutes: 0,
-      tags: ["breakfast", "high-protein"],
-      createdAt: "0001-01-01T00:00:00+00:00",
-      updatedAt: "0001-01-01T00:00:00+00:00"
-    }
-  },
-  {
-    id: "recipe-multiple",
-    label: "Recipes (multiple)",
-    payloadType: "recipes",
-    payload: [
-      {
-        id: "",
-        name: "Oatmeal Power Bowl",
-        description: "Simple hot breakfast.",
-        ingredients: ["Rolled oats", "Milk", "Banana", "Peanut butter"],
-        steps: ["Cook oats with milk.", "Top with banana and peanut butter."],
-        prepMinutes: 3,
-        cookMinutes: 7,
-        tags: ["breakfast"],
-        createdAt: "0001-01-01T00:00:00+00:00",
-        updatedAt: "0001-01-01T00:00:00+00:00"
-      }
-    ]
-  },
-  {
-    id: "meal-plan",
-    label: "Meal plan",
-    payloadType: "meal-plan",
-    payload: {
-      id: "",
-      name: "Weekday Plan",
-      payloadJson: "{\"weekStart\":\"2026-06-15\",\"days\":[{\"day\":\"Monday\",\"breakfastText\":\"Yogurt bowl\",\"lunchText\":\"Chicken salad\",\"dinnerText\":\"Salmon and rice\"}]}",
-      createdAt: "0001-01-01T00:00:00+00:00"
-    }
-  },
-  {
-    id: "discounts",
-    label: "Discounts",
-    payloadType: "discount",
-    payload: [
-      {
-        id: "",
-        storeName: "Market Basket",
-        itemName: "Greek Yogurt",
-        originalPrice: 5.49,
-        discountedPrice: 3.99,
-        unit: "32 oz",
-        validFrom: "2026-06-16",
-        validTo: "2026-06-23",
-        createdAt: "0001-01-01T00:00:00+00:00"
-      }
-    ]
-  },
-  {
-    id: "training-plan",
-    label: "Training plan",
-    payloadType: "training-plan",
-    payload: {
-      id: "",
-      weekKey: "2026-W25",
-      payloadJson: "{\"sessions\":[{\"day\":\"Monday\",\"workout\":\"Easy Run\",\"durationMinutes\":45}]}",
-      createdAt: "0001-01-01T00:00:00+00:00"
-    }
-  }
 ];
 
 const SETTINGS_SECTIONS: Array<{
@@ -2149,7 +2063,7 @@ function SettingsPage({
             <>
               <div className="settings-pane-header">
                 <h3>Imports</h3>
-                <p className="muted">Load JSON files or templates and import directly into Health HQ.</p>
+                <p className="muted">Load JSON files or paste payloads and import directly into Health HQ.</p>
               </div>
               <ImportsPage />
             </>
@@ -2175,7 +2089,6 @@ function ImportsPage() {
   const [payload, setPayload] = React.useState("{}");
   const [message, setMessage] = React.useState("");
   const [selectedFileName, setSelectedFileName] = React.useState("");
-  const [selectedTemplateId, setSelectedTemplateId] = React.useState("");
 
   function isImportEnvelope(value: unknown): value is { payloadType: string; payload: unknown } {
     return (
@@ -2281,24 +2194,6 @@ function ImportsPage() {
     }
   }
 
-  function applyTemplate(event: React.ChangeEvent<HTMLSelectElement>) {
-    const templateId = event.target.value;
-    setSelectedTemplateId(templateId);
-    if (!templateId) {
-      return;
-    }
-
-    const template = IMPORT_TEMPLATES.find((item) => item.id === templateId);
-    if (!template) {
-      return;
-    }
-
-    setPayloadType(template.payloadType);
-    setPayload(JSON.stringify(template.payload, null, 2));
-    setSelectedFileName("");
-    setMessage(`Loaded ${template.label} template`);
-  }
-
   return (
     <form className="stack imports-form" onSubmit={submit}>
       <div className="settings-pane-subheader">
@@ -2312,17 +2207,6 @@ function ImportsPage() {
           <option value="recipe">Recipe</option>
           <option value="recipes">Recipes</option>
           <option value="training-plan">Training plan</option>
-        </select>
-      </label>
-      <label>
-        Load template
-        <select value={selectedTemplateId} onChange={applyTemplate}>
-          <option value="">Select a sample template</option>
-          {IMPORT_TEMPLATES.map((template) => (
-            <option key={template.id} value={template.id}>
-              {template.label}
-            </option>
-          ))}
         </select>
       </label>
       <label>

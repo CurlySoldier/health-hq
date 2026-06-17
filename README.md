@@ -75,4 +75,4 @@ Notes:
 - Install local git hooks with `sh scripts/install-git-hooks.sh` to enforce `theme:check` on every commit.
 - No authentication is enabled (trusted LAN only).
 - Parsed JSON payloads are stored in SQLite; source PDFs are not retained.
-- On first startup (when no training plans exist), Health HQ seeds demo records for training, nutrition, shopping, vitality, body metrics, and imports. Activity and sleep data are not demo-seeded.
+- Health HQ does not seed demo data automatically; all records come from sync/import flows or manual entry.

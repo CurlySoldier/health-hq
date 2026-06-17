@@ -44,7 +44,6 @@ var app = builder.Build();
 
 var store = app.Services.GetRequiredService<SqliteDocumentStore>();
 await store.InitializeAsync();
-await HealthHq.App.Host.DemoDataSeeder.SeedAsync(app.Services);
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

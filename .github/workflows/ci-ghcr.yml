@@ -37,6 +37,9 @@ jobs:
       - name: Build
         run: dotnet build src/App.Host/App.Host.csproj -c Release --no-restore
 
+      - name: Build Garmin DB container image
+        run: docker build -f deploy/garmin/Dockerfile deploy
+
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -55,6 +58,7 @@ jobs:
       - name: Set image name
         run: |
           echo "IMAGE_NAME=$(echo ${GITHUB_REPOSITORY} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "GARMIN_IMAGE_NAME=$(echo ${GITHUB_REPOSITORY} | tr '[:upper:]' '[:lower:]')-garmin-db" >> $GITHUB_ENV
 
       - name: Build and push container image
         uses: docker/build-push-action@v6
@@ -64,3 +68,13 @@ jobs:
           tags: |
             ghcr.io/${{ env.IMAGE_NAME }}:main
             ghcr.io/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
+      - name: Build and push Garmin DB container image
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy
+          file: garmin/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.GARMIN_IMAGE_NAME }}:main
+            ghcr.io/${{ env.GARMIN_IMAGE_NAME }}:sha-${{ github.sha }}

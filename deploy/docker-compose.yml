@@ -22,7 +22,7 @@ services:
       - healthhq-data:/app/data
 
   garmin-db:
-    image: python:3.12-alpine
+    image: ${GARMIN_DB_IMAGE_NAME:-ghcr.io/curlysoldier/health-hq-garmin-db:main}
     container_name: garmin-db
     restart: unless-stopped
     environment:
@@ -32,7 +32,6 @@ services:
       - GARMIN_MAX_BACKOFF_MINUTES=${GARMIN_MAX_BACKOFF_MINUTES:-360}
     volumes:
       - healthhq-data:/app/data
-      - ./garmin/entrypoint.sh:/entrypoint.sh:ro
     command: ["sh", "/entrypoint.sh"]
 
 volumes:
