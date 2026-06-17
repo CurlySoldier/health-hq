@@ -70,7 +70,7 @@ jobs:
       - name: Build and push Garmin DB container image
         uses: docker/build-push-action@v6
         with:
-          context: deploy
+          context: .
           file: deploy/garmin/Dockerfile
           push: true
           tags: |
