@@ -76,6 +76,22 @@
   --recipe-day-border: #2f4a5d;
   --recipe-day-bg: #142d3d;
   --recipe-day-title: #a7c0d1;
+  --settings-nav-bg: rgba(18, 42, 57, 0.55);
+  --settings-nav-hover-bg: rgba(24, 56, 77, 0.72);
+  --settings-nav-active-a: rgba(39, 98, 129, 0.78);
+  --settings-nav-active-b: rgba(39, 103, 90, 0.72);
+  --sleep-stage-deep: #2d4f7f;
+  --sleep-stage-light: #4f769f;
+  --sleep-stage-rem: #7ca4c8;
+  --button-danger-a: #b75c49;
+  --button-danger-b: #9e3d2b;
+  --toast-info-border: #3e6276;
+  --toast-info-bg: #18394c;
+  --toast-success-border: #4e8c7d;
+  --toast-success-bg: #1a4138;
+  --toast-error-border: #a15f4c;
+  --toast-error-bg: #47271f;
+  --text-on-accent: #ffffff;
   --code-bg: #102331;
   --code-border: #2d4a5f;
 }

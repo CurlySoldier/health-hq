@@ -76,6 +76,22 @@
   --recipe-day-border: #2f4a5d;
   --recipe-day-bg: #142d3d;
   --recipe-day-title: #a7c0d1;
+  --settings-nav-bg: rgba(18, 42, 57, 0.55);
+  --settings-nav-hover-bg: rgba(24, 56, 77, 0.72);
+  --settings-nav-active-a: rgba(39, 98, 129, 0.78);
+  --settings-nav-active-b: rgba(39, 103, 90, 0.72);
+  --sleep-stage-deep: #2d4f7f;
+  --sleep-stage-light: #4f769f;
+  --sleep-stage-rem: #7ca4c8;
+  --button-danger-a: #b75c49;
+  --button-danger-b: #9e3d2b;
+  --toast-info-border: #3e6276;
+  --toast-info-bg: #18394c;
+  --toast-success-border: #4e8c7d;
+  --toast-success-bg: #1a4138;
+  --toast-error-border: #a15f4c;
+  --toast-error-bg: #47271f;
+  --text-on-accent: #ffffff;
   --code-bg: #102331;
   --code-border: #2d4a5f;
 }
@@ -96,6 +112,7 @@ body {
 
 .app {
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 .topbar {
@@ -211,6 +228,18 @@ h4 {
   animation: panel-in 260ms ease;
 }
 
+.panel,
+.card,
+.shopping-card,
+.recipe-card,
+.deal-radar,
+.week-day,
+.training-session-row,
+.connection-block,
+.imports-form {
+  min-width: 0;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -237,7 +266,7 @@ h4 {
 .settings-nav-item {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: rgba(18, 42, 57, 0.55);
+  background: var(--settings-nav-bg);
   color: var(--text);
   text-align: left;
   padding: 0.7rem 0.75rem;
@@ -257,12 +286,12 @@ h4 {
 
 .settings-nav-item:hover {
   border-color: var(--focus-border);
-  background: rgba(24, 56, 77, 0.72);
+  background: var(--settings-nav-hover-bg);
 }
 
 .settings-nav-item-active {
   border-color: var(--focus-border);
-  background: linear-gradient(135deg, rgba(39, 98, 129, 0.78), rgba(39, 103, 90, 0.72));
+  background: linear-gradient(135deg, var(--settings-nav-active-a), var(--settings-nav-active-b));
 }
 
 .settings-content-panel {
@@ -394,7 +423,7 @@ h4 {
 .chip-active {
   background: linear-gradient(135deg, var(--chip-active-a), var(--chip-active-b));
   border-color: transparent;
-  color: #fff;
+  color: var(--text-on-accent);
 }
 
 .filter-row {
@@ -558,20 +587,20 @@ svg {
   justify-content: center;
   font-size: 0.76rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-on-accent);
   white-space: nowrap;
 }
 
 .sleep-stage-deep {
-  background: #2d4f7f;
+  background: var(--sleep-stage-deep);
 }
 
 .sleep-stage-light {
-  background: #4f769f;
+  background: var(--sleep-stage-light);
 }
 
 .sleep-stage-rem {
-  background: #7ca4c8;
+  background: var(--sleep-stage-rem);
 }
 
 .insight-stack {
@@ -659,7 +688,7 @@ button {
   border: none;
   border-radius: 11px;
   background: linear-gradient(135deg, var(--button-a), var(--button-b));
-  color: #fff;
+  color: var(--text-on-accent);
   font-weight: 700;
   padding: 0.6rem 0.92rem;
   text-decoration: none;
@@ -750,7 +779,49 @@ button:hover {
 }
 
 .button-danger {
-  background: linear-gradient(135deg, #b75c49, #9e3d2b);
+  background: linear-gradient(135deg, var(--button-danger-a), var(--button-danger-b));
+}
+
+.button-compact {
+  padding: 0.36rem 0.62rem;
+  border-radius: 9px;
+  font-size: 0.84rem;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  display: grid;
+  gap: 0.5rem;
+  z-index: 20;
+  max-width: min(92vw, 420px);
+}
+
+.status-toast {
+  margin: 0;
+  border-radius: 10px;
+  border: 1px solid var(--field-border);
+  background: var(--surface-alt);
+  color: var(--text);
+  padding: 0.62rem 0.75rem;
+  box-shadow: var(--shadow);
+  animation: panel-in 140ms ease-out;
+}
+
+.status-toast-info {
+  border-color: var(--toast-info-border);
+  background: var(--toast-info-bg);
+}
+
+.status-toast-success {
+  border-color: var(--toast-success-border);
+  background: var(--toast-success-bg);
+}
+
+.status-toast-error {
+  border-color: var(--toast-error-border);
+  background: var(--toast-error-bg);
 }
 
 .training-snapshot {
@@ -873,6 +944,7 @@ button:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.55rem;
   border: 1px solid var(--shopping-line-border);
   border-radius: 10px;
   padding: 0.42rem 0.6rem;
@@ -955,9 +1027,21 @@ code {
   .meal-slots {
     grid-template-columns: 1fr;
   }
+
+  .settings-theme-select {
+    max-width: none;
+  }
 }
 
 @media (max-width: 720px) {
+  .topbar {
+    padding: 0.85rem 0.8rem;
+  }
+
+  .topbar h1 {
+    font-size: 1.15rem;
+  }
+
   .topbar-actions {
     width: 100%;
     justify-content: space-between;
@@ -970,6 +1054,14 @@ code {
   }
 
   .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-pane-subheader,
+  .training-plan-list-header,
+  .training-session-list-header,
+  .shopping-card-head {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -990,11 +1082,54 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .stat-strip,
+  .stat-strip-vitals {
+    grid-template-columns: 1fr;
+  }
+
   main {
     padding: 0.8rem 0.8rem 1.4rem;
   }
 
   table {
     min-width: 560px;
+  }
+
+  .toast-stack {
+    left: 0.8rem;
+    right: 0.8rem;
+    max-width: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .panel,
+  .card,
+  .shopping-card,
+  .recipe-card,
+  .deal-radar,
+  .week-day,
+  .training-session-row,
+  .connection-block,
+  .imports-form {
+    padding: 0.72rem;
+  }
+
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shopping-line {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .button,
+  button {
+    width: 100%;
+  }
+
+  nav a {
+    padding: 0.4rem 0.66rem;
   }
 }

@@ -3380,6 +3380,57 @@ function BodyPage() {
     await loadVitalSigns();
   }
 
+  async function deleteMetricEntry(entry: BodyMetricEntry) {
+    if (!window.confirm(`Delete metric entry for ${formatDay(entry.day)}?`)) {
+      return;
+    }
+
+    setMessage("Deleting metric entry...");
+    const response = await fetch(`/api/body-metrics/${encodeURIComponent(entry.id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      setMessage("Could not delete metric entry.");
+      return;
+    }
+
+    setEntries((current) => current.filter((item) => item.id !== entry.id));
+    setMessage("Metric entry deleted.");
+  }
+
+  async function deleteVitalEntry(entry: VitalSignEntry) {
+    if (!window.confirm(`Delete vital reading from ${formatDateTime(entry.measuredAt)}?`)) {
+      return;
+    }
+
+    setVitalMessage("Deleting vital reading...");
+    const response = await fetch(`/api/vital-signs/${encodeURIComponent(entry.id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      setVitalMessage("Could not delete vital reading.");
+      return;
+    }
+
+    setVitalSigns((current) => current.filter((item) => item.id !== entry.id));
+    setVitalMessage("Vital reading deleted.");
+  }
+
+  function statusTone(value: string): "success" | "error" | "info" {
+    const normalized = value.toLowerCase();
+    if (
+      normalized.includes("could not") ||
+      normalized.includes("please") ||
+      normalized.includes("enter ") ||
+      normalized.includes("use realistic") ||
+      normalized.includes("lower than")
+    ) {
+      return "error";
+    }
+
+    if (normalized.includes("saved") || normalized.includes("deleted")) {
+      return "success";
+    }
+
+    return "info";
+  }
+
   const orderedForChart = [...entries].sort((a, b) => a.day.localeCompare(b.day));
   const latest = entries[0];
   const oldest = entries[entries.length - 1];
@@ -3437,7 +3488,6 @@ function BodyPage() {
           </div>
 
           <button className="button" type="submit">Save metrics</button>
-          <p>{message}</p>
         </form>
 
         <form className="panel stack" onSubmit={submitVitalSign}>
@@ -3477,8 +3527,12 @@ function BodyPage() {
             />
           </label>
           <button className="button" type="submit">Save vitals</button>
-          <p>{vitalMessage}</p>
         </form>
+      </div>
+
+      <div className="toast-stack" aria-live="polite" aria-atomic="true">
+        {message ? <p className={`status-toast status-toast-${statusTone(message)}`}>{message}</p> : null}
+        {vitalMessage ? <p className={`status-toast status-toast-${statusTone(vitalMessage)}`}>{vitalMessage}</p> : null}
       </div>
 
       <div className="grid body-grid">
@@ -3551,6 +3605,7 @@ function BodyPage() {
                   <th>Weight</th>
                   <th>BMI</th>
                   <th>Category</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -3561,6 +3616,11 @@ function BodyPage() {
                     <td>{entry.weightKg.toFixed(1)} kg</td>
                     <td>{entry.bmi.toFixed(2)}</td>
                     <td>{entry.category}</td>
+                    <td>
+                      <button className="button button-danger button-compact" type="button" onClick={() => deleteMetricEntry(entry)}>
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -3581,6 +3641,7 @@ function BodyPage() {
                   <th>Measured</th>
                   <th>Blood pressure</th>
                   <th>Pulse</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -3589,6 +3650,11 @@ function BodyPage() {
                     <td>{formatDateTime(entry.measuredAt)}</td>
                     <td>{entry.systolic}/{entry.diastolic} mmHg</td>
                     <td>{entry.pulse} bpm</td>
+                    <td>
+                      <button className="button button-danger button-compact" type="button" onClick={() => deleteVitalEntry(entry)}>
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

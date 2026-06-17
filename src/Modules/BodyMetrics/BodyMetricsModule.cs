@@ -39,6 +39,18 @@ public static class BodyMetricsModule
             return Results.Ok(entry);
         });
 
+        app.MapDelete("/api/body-metrics/{id}", async (string id, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var existing = await store.GetByIdAsync<BodyMetricEntry>(DocumentTypes.BodyMetric, id, cancellationToken);
+            if (existing is null)
+            {
+                return Results.NotFound(new { message = "Body metric entry not found." });
+            }
+
+            await store.DeleteAsync(DocumentTypes.BodyMetric, id, cancellationToken);
+            return Results.Ok(new { deleted = true, id });
+        });
+
         app.MapGet("/api/vital-signs", async (IDocumentStore store, CancellationToken cancellationToken) =>
         {
             var entries = await store.ListAsync<VitalSignEntry>(DocumentTypes.VitalSign, 500, cancellationToken);
@@ -65,6 +77,18 @@ public static class BodyMetricsModule
 
             await store.UpsertAsync(DocumentTypes.VitalSign, entry.Id, entry, recordedAt: entry.MeasuredAt, cancellationToken: cancellationToken);
             return Results.Ok(entry);
+        });
+
+        app.MapDelete("/api/vital-signs/{id}", async (string id, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var existing = await store.GetByIdAsync<VitalSignEntry>(DocumentTypes.VitalSign, id, cancellationToken);
+            if (existing is null)
+            {
+                return Results.NotFound(new { message = "Vital sign entry not found." });
+            }
+
+            await store.DeleteAsync(DocumentTypes.VitalSign, id, cancellationToken);
+            return Results.Ok(new { deleted = true, id });
         });
 
         return app;

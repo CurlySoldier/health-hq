@@ -236,6 +236,30 @@ paths:
               schema:
                 $ref: '#/components/schemas/BodyMetricEntry'
 
+  /api/body-metrics/{id}:
+    delete:
+      tags: [BodyMetrics]
+      summary: Delete a body metric entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Body metric entry deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Body metric entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
   /api/vital-signs:
     get:
       tags: [BodyMetrics]
@@ -267,6 +291,30 @@ paths:
                 $ref: '#/components/schemas/VitalSignEntry'
         '400':
           description: Invalid vital sign values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /api/vital-signs/{id}:
+    delete:
+      tags: [BodyMetrics]
+      summary: Delete a blood pressure and pulse reading
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Vital sign entry deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '404':
+          description: Vital sign entry not found
           content:
             application/json:
               schema:
@@ -627,6 +675,13 @@ components:
         imported: { type: boolean }
         payloadId: { type: string }
       required: [imported, payloadId]
+
+    DeleteResponse:
+      type: object
+      properties:
+        deleted: { type: boolean }
+        id: { type: string }
+      required: [deleted, id]
 
     ErrorMessage:
       type: object
