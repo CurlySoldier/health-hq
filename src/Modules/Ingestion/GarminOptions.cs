@@ -6,6 +6,6 @@ public sealed class GarminOptions
     public int PollingIntervalMinutes { get; init; } = 30;
     public string RuntimeDirectory { get; init; } = "garmin";
     public string ActivitiesDatabaseRelativePath { get; init; } = "garmin/HealthData/DBs/garmin_activities.db";
-    public string DefaultStartDate { get; init; } = "01/01/2020";
+    public string DefaultStartDate { get; init; } = "01/01/2026";
     public int DefaultDownloadLatestActivities { get; init; } = 25;
 }

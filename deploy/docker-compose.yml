@@ -1,6 +1,7 @@
 services:
   health-hq:
-    image: ${IMAGE_NAME:-health-hq:local}
+    image: ${HEALTH_HQ_IMAGE_NAME:-health-hq:local}
+    pull_policy: never
     build:
       context: ..
       dockerfile: Dockerfile
@@ -22,7 +23,8 @@ services:
       - healthhq-data:/app/data
 
   garmin-db:
-    image: ${GARMIN_DB_IMAGE_NAME:-ghcr.io/curlysoldier/health-hq-garmin-db:main}
+    image: ${GARMIN_IMAGE_NAME:-health-hq-garmin-db:local}
+    pull_policy: never
     build:
       context: ..
       dockerfile: deploy/garmin/Dockerfile

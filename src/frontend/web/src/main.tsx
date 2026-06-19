@@ -1776,7 +1776,7 @@ function ConnectionsPage() {
   const [garminStatus, setGarminStatus] = React.useState<GarminStatus | null>(null);
   const [garminUsername, setGarminUsername] = React.useState("");
   const [garminPassword, setGarminPassword] = React.useState("");
-  const [garminStartDate, setGarminStartDate] = React.useState("2020-01-01");
+  const [garminStartDate, setGarminStartDate] = React.useState("2026-01-01");
   const [garminMessage, setGarminMessage] = React.useState("");
 
   async function loadGarminStatus() {
