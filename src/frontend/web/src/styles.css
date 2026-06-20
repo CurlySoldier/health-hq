@@ -137,6 +137,13 @@
   --bar-running-volume: #6bb2d9;
   --running-point-low: #65abcf;
   --running-point-high: #77cfab;
+  --pet-shell: #7ec7ea;
+  --pet-shell-shadow: #4a88ad;
+  --pet-face: #e9f6ff;
+  --pet-feature: #183447;
+  --pet-unwell: #c18979;
+  --pet-lonely: #7f9bad;
+  --pet-thriving: #61d3af;
 }
 
 * {
@@ -1115,6 +1122,258 @@ button:hover {
   max-width: min(92vw, 420px);
 }
 
+.pet-widget {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 0.62rem;
+  min-width: 166px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.55rem 0.65rem;
+  text-decoration: none;
+  color: var(--text);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--surface) 88%, var(--accent) 12%), var(--surface-alt));
+  box-shadow: var(--shadow);
+}
+
+.pet-widget-copy {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.pet-widget .eyebrow {
+  font-size: 0.66rem;
+}
+
+.pet-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+}
+
+.pet-banner-great {
+  border-color: color-mix(in srgb, var(--accent-2) 50%, var(--line) 50%);
+}
+
+.pet-banner-rough {
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--line) 48%);
+}
+
+.pet-banner-copy {
+  margin: 0;
+  font-weight: 700;
+}
+
+.pet-banner-actions {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.pet-streak {
+  font-size: 0.92rem;
+  margin-left: 0.35rem;
+  color: var(--accent-2);
+}
+
+.pet-summary-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  font-weight: 600;
+}
+
+.pet-hero {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
+}
+
+.pet-avatar {
+  position: relative;
+  width: 164px;
+  height: 174px;
+  display: grid;
+  place-items: center;
+  animation: pet-float 2.8s ease-in-out infinite;
+}
+
+.pet-avatar-compact {
+  width: 56px;
+  height: 56px;
+  animation-duration: 3.4s;
+}
+
+.pet-ears,
+.pet-face,
+.pet-body {
+  position: absolute;
+}
+
+.pet-ears {
+  width: 104px;
+  height: 54px;
+  top: 18px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 18% 52%, var(--pet-face) 0 14px, transparent 15px),
+    radial-gradient(circle at 82% 52%, var(--pet-face) 0 14px, transparent 15px),
+    linear-gradient(140deg, var(--pet-shell), var(--pet-shell-shadow));
+}
+
+.pet-face {
+  top: 38px;
+  width: 108px;
+  height: 96px;
+  border-radius: 52px;
+  background: var(--pet-face);
+  border: 2px solid color-mix(in srgb, var(--pet-shell-shadow) 60%, #fff 40%);
+}
+
+.pet-eye {
+  position: absolute;
+  top: 32px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--pet-feature);
+  animation: pet-blink 4.2s steps(1, end) infinite;
+}
+
+.pet-eye-left {
+  left: 29px;
+}
+
+.pet-eye-right {
+  right: 29px;
+}
+
+.pet-mouth {
+  position: absolute;
+  width: 24px;
+  height: 11px;
+  left: calc(50% - 12px);
+  top: 57px;
+  border-bottom: 3px solid var(--pet-feature);
+  border-radius: 0 0 12px 12px;
+}
+
+.pet-body {
+  top: 112px;
+  width: 126px;
+  height: 56px;
+  border-radius: 34px;
+  background: linear-gradient(180deg, var(--pet-shell), var(--pet-shell-shadow));
+}
+
+.pet-avatar-compact .pet-ears {
+  width: 36px;
+  height: 19px;
+  top: 4px;
+}
+
+.pet-avatar-compact .pet-face {
+  top: 10px;
+  width: 38px;
+  height: 34px;
+  border-width: 1.5px;
+}
+
+.pet-avatar-compact .pet-eye {
+  top: 11px;
+  width: 4px;
+  height: 4px;
+}
+
+.pet-avatar-compact .pet-eye-left {
+  left: 10px;
+}
+
+.pet-avatar-compact .pet-eye-right {
+  right: 10px;
+}
+
+.pet-avatar-compact .pet-mouth {
+  width: 9px;
+  height: 4px;
+  left: calc(50% - 4.5px);
+  top: 18px;
+  border-bottom-width: 1.5px;
+}
+
+.pet-avatar-compact .pet-body {
+  top: 34px;
+  width: 44px;
+  height: 19px;
+}
+
+.pet-avatar-thriving .pet-body,
+.pet-avatar-happy .pet-body {
+  background: linear-gradient(180deg, var(--pet-thriving), color-mix(in srgb, var(--pet-shell-shadow) 56%, var(--pet-thriving) 44%));
+}
+
+.pet-avatar-lonely .pet-body,
+.pet-avatar-lonely .pet-ears {
+  filter: saturate(0.68);
+}
+
+.pet-avatar-unwell .pet-body,
+.pet-avatar-unwell .pet-ears {
+  background: linear-gradient(180deg, var(--pet-unwell), color-mix(in srgb, var(--pet-unwell) 62%, var(--pet-shell-shadow) 38%));
+}
+
+.pet-avatar-unwell .pet-mouth,
+.pet-avatar-lonely .pet-mouth,
+.pet-avatar-tired .pet-mouth {
+  border-bottom-width: 0;
+  border-top: 3px solid var(--pet-feature);
+  border-radius: 12px 12px 0 0;
+  top: 62px;
+}
+
+.pet-avatar-tired .pet-eye,
+.pet-avatar-night .pet-eye {
+  height: 2px;
+  border-radius: 999px;
+}
+
+.pet-stat-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem 0.8rem;
+}
+
+.pet-stat-track {
+  grid-column: 1 / -1;
+  height: 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-alt) 74%, var(--line) 26%);
+  overflow: hidden;
+}
+
+.pet-stat-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.pet-context-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
 .status-toast {
   margin: 0;
   border-radius: 10px;
@@ -1328,6 +1587,27 @@ code {
   }
 }
 
+@keyframes pet-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes pet-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.1);
+  }
+}
+
 @media (max-width: 940px) {
   .settings-layout,
   .training-layout,
@@ -1430,6 +1710,15 @@ code {
     right: 0.8rem;
     max-width: none;
   }
+
+  .pet-context-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pet-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1457,6 +1746,13 @@ code {
   .button,
   button {
     width: 100%;
+  }
+
+  .pet-widget {
+    right: 0.8rem;
+    left: 0.8rem;
+    bottom: 0.8rem;
+    min-width: 0;
   }
 
   nav a {

@@ -137,4 +137,10 @@
   --bar-running-volume: #6bb2d9;
   --running-point-low: #65abcf;
   --running-point-high: #77cfab;
+  --pet-shell: #7ec7ea;
+  --pet-shell-shadow: #4a88ad;
+  --pet-face: #e9f6ff;
+  --pet-feature: #183447;
+  --pet-thriving: #61d3af;
+  --pet-unwell: #c18979;
 }

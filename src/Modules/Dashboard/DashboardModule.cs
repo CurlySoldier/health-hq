@@ -908,6 +908,26 @@ public static class DashboardModule
             });
         });
 
+        app.MapGet("/api/dashboard/health-pet", async (IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
+            var lookbackStart = today.AddDays(-59);
+            var (fromInclusive, toInclusive) = ToUtcDayRange(lookbackStart, today);
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+            var steps = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, fromInclusive, toInclusive, cancellationToken);
+            var sleep = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, fromInclusive, toInclusive, cancellationToken);
+            var bodyMetrics = await store.ListAsync<BodyMetricEntry>(DocumentTypes.BodyMetric, 365, cancellationToken);
+            var vitalSigns = await store.ListAsync<VitalSignEntry>(DocumentTypes.VitalSign, 1000, cancellationToken);
+
+            var payload = BuildHealthPetPayload(today, now, activities, steps, sleep, bodyMetrics, vitalSigns);
+            return Results.Ok(payload);
+        });
+
         return app;
     }
 
@@ -970,6 +990,277 @@ public static class DashboardModule
             <= 1.5 => "caution",
             _ => "elevated"
         };
+    }
+
+    private static object BuildHealthPetPayload(
+        DateOnly today,
+        DateTimeOffset generatedAt,
+        IReadOnlyList<ActivityRecord> activities,
+        IReadOnlyList<DailyStepsRecord> steps,
+        IReadOnlyList<SleepSummaryRecord> sleep,
+        IReadOnlyList<BodyMetricEntry> bodyMetrics,
+        IReadOnlyList<VitalSignEntry> vitalSigns)
+    {
+        var stepsByDay = steps
+            .GroupBy(x => x.Day)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.TotalSteps).First());
+        var sleepByDay = sleep
+            .GroupBy(x => x.Day)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.SleepHours).First());
+        var activeMinutesByDay = activities
+            .GroupBy(x => DateOnly.FromDateTime(x.StartTime.UtcDateTime))
+            .ToDictionary(group => group.Key, group => group.Sum(GetEffectiveDurationMinutes));
+        var restingByDay = steps
+            .GroupBy(x => x.Day)
+            .ToDictionary(group => group.Key, group =>
+            {
+                foreach (var item in group)
+                {
+                    if (TryExtractRestingHeartRate(item.RawJson, out var restingHeartRate))
+                    {
+                        return (double?)restingHeartRate;
+                    }
+                }
+
+                return (double?)null;
+            });
+
+        var engagementDays = new HashSet<DateOnly>();
+        foreach (var metric in bodyMetrics)
+        {
+            engagementDays.Add(metric.Day);
+        }
+
+        foreach (var vital in vitalSigns)
+        {
+            engagementDays.Add(DateOnly.FromDateTime(vital.MeasuredAt.UtcDateTime));
+        }
+
+        var todaySnapshot = BuildPetDaySnapshot(today, sleepByDay, activeMinutesByDay, stepsByDay, restingByDay, engagementDays);
+
+        var careStreak = 0;
+        for (var cursor = today; cursor >= today.AddDays(-365); cursor = cursor.AddDays(-1))
+        {
+            var snapshot = BuildPetDaySnapshot(cursor, sleepByDay, activeMinutesByDay, stepsByDay, restingByDay, engagementDays);
+            if (snapshot.Mood is "happy" or "thriving")
+            {
+                careStreak++;
+                continue;
+            }
+
+            break;
+        }
+
+        var dayTone = todaySnapshot.Mood switch
+        {
+            "thriving" or "happy" => "great",
+            "neutral" => "steady",
+            _ => "rough"
+        };
+
+        var localHour = DateTimeOffset.Now.Hour;
+
+        return new
+        {
+            day = today,
+            generatedAt,
+            isNightTime = localHour >= 21 || localHour < 6,
+            mood = todaySnapshot.Mood,
+            careStreak,
+            dailySummary = new
+            {
+                tone = dayTone,
+                message = $"Your pet had a {dayTone} day."
+            },
+            stats = new
+            {
+                energy = new
+                {
+                    value = todaySnapshot.Energy,
+                    sleepHours = todaySnapshot.SleepHours,
+                    sleepEfficiencyPct = todaySnapshot.SleepEfficiency
+                },
+                happiness = new
+                {
+                    value = todaySnapshot.Happiness,
+                    currentMovement = todaySnapshot.CurrentMovement,
+                    baseline30 = todaySnapshot.MovementBaseline,
+                    deltaPct = todaySnapshot.MovementDeltaPct
+                },
+                health = new
+                {
+                    value = todaySnapshot.Health,
+                    restingHr7 = todaySnapshot.Rhr7,
+                    restingHr30 = todaySnapshot.Rhr30,
+                    delta = todaySnapshot.RhrDelta
+                },
+                engagement = new
+                {
+                    value = todaySnapshot.Engagement,
+                    loggedDays = todaySnapshot.EngagedDays,
+                    windowDays = 7
+                }
+            },
+            flavorHint = new
+            {
+                key = todaySnapshot.FlavorKey,
+                direction = todaySnapshot.FlavorDirection,
+                magnitude = todaySnapshot.FlavorMagnitude
+            }
+        };
+    }
+
+    private static PetDaySnapshot BuildPetDaySnapshot(
+        DateOnly day,
+        IReadOnlyDictionary<DateOnly, SleepSummaryRecord> sleepByDay,
+        IReadOnlyDictionary<DateOnly, double> activeMinutesByDay,
+        IReadOnlyDictionary<DateOnly, DailyStepsRecord> stepsByDay,
+        IReadOnlyDictionary<DateOnly, double?> restingByDay,
+        IReadOnlySet<DateOnly> engagementDays)
+    {
+        var latestSleep = sleepByDay
+            .Where(x => x.Key <= day)
+            .OrderByDescending(x => x.Key)
+            .Select(x => x.Value)
+            .FirstOrDefault();
+
+        var sleepEfficiency = latestSleep is null
+            ? (double?)null
+            : latestSleep.SleepHours + latestSleep.AwakeHours <= 0
+                ? (double?)null
+                : Math.Round((latestSleep.SleepHours / (latestSleep.SleepHours + latestSleep.AwakeHours)) * 100d, 1);
+
+        var energy = latestSleep is null
+            ? 50d
+            : ClampScore((NormalizeRange(latestSleep.SleepHours, 4, 9) * 0.65) + ((sleepEfficiency ?? 75) * 0.35));
+
+        var movementByDay = new Dictionary<DateOnly, double>();
+        foreach (var cursor in EnumerateDays(day.AddDays(-59), day))
+        {
+            if (stepsByDay.TryGetValue(cursor, out var stepRecord))
+            {
+                movementByDay[cursor] = stepRecord.TotalSteps;
+                continue;
+            }
+
+            if (activeMinutesByDay.TryGetValue(cursor, out var activeMinutes) && activeMinutes > 0)
+            {
+                movementByDay[cursor] = Math.Round(activeMinutes * 120d, 1);
+            }
+        }
+
+        var movementBaselineValues = EnumerateDays(day.AddDays(-30), day.AddDays(-1))
+            .Select(cursor => movementByDay.TryGetValue(cursor, out var value) ? (double?)value : null)
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .ToArray();
+        var movementBaseline = movementBaselineValues.Length == 0 ? (double?)null : Math.Round(movementBaselineValues.Average(), 1);
+        var latestMovement = movementByDay
+            .Where(x => x.Key <= day)
+            .OrderByDescending(x => x.Key)
+            .Select(x => (double?)x.Value)
+            .FirstOrDefault();
+        var movementDeltaPct = movementBaseline.HasValue && movementBaseline > 0 && latestMovement.HasValue
+            ? Math.Round((latestMovement.Value - movementBaseline.Value) / movementBaseline.Value, 4)
+            : (double?)null;
+        var happiness = movementDeltaPct.HasValue
+            ? ClampScore(50 + (movementDeltaPct.Value * 120d))
+            : 50d;
+
+        var rhrDays = EnumerateDays(day.AddDays(-35), day).ToArray();
+        var rhrValues = rhrDays
+            .Select(cursor => restingByDay.TryGetValue(cursor, out var value) ? value : null)
+            .ToArray();
+        var rolling7 = ComputeRollingAverage(rhrValues, 7);
+        var rolling30 = ComputeRollingAverage(rhrValues, 30);
+        var rhr7 = rolling7[^1];
+        var rhr30 = rolling30[^1];
+        var rhrDelta = rhr7.HasValue && rhr30.HasValue ? Math.Round(rhr7.Value - rhr30.Value, 2) : (double?)null;
+        var health = rhrDelta.HasValue
+            ? ClampScore(70 - (rhrDelta.Value * 8d))
+            : 65d;
+
+        var engagedInLast7 = EnumerateDays(day.AddDays(-6), day).Count(cursor => engagementDays.Contains(cursor));
+        var engagement = ClampScore((engagedInLast7 / 7d) * 100d);
+
+        var mood = ResolvePetMood(health, engagement, energy, happiness);
+
+        var deviations = new[]
+        {
+            new { key = "energy", value = Math.Round(energy - 60d, 2) },
+            new { key = "happiness", value = movementDeltaPct.HasValue ? Math.Round(movementDeltaPct.Value * 100d, 2) : Math.Round(happiness - 50d, 2) },
+            new { key = "health", value = rhrDelta.HasValue ? Math.Round(-rhrDelta.Value * 10d, 2) : Math.Round(health - 60d, 2) },
+            new { key = "engagement", value = Math.Round(engagement - 70d, 2) }
+        };
+
+        var strongest = deviations
+            .OrderByDescending(x => Math.Abs(x.value))
+            .First();
+
+        return new PetDaySnapshot(
+            Energy: energy,
+            Happiness: happiness,
+            Health: health,
+            Engagement: engagement,
+            Mood: mood,
+            SleepHours: latestSleep?.SleepHours,
+            SleepEfficiency: sleepEfficiency,
+            CurrentMovement: latestMovement,
+            MovementBaseline: movementBaseline,
+            MovementDeltaPct: movementDeltaPct,
+            Rhr7: rhr7,
+            Rhr30: rhr30,
+            RhrDelta: rhrDelta,
+            EngagedDays: engagedInLast7,
+            FlavorKey: strongest.key,
+            FlavorDirection: strongest.value >= 0 ? "up" : "down",
+            FlavorMagnitude: Math.Round(Math.Abs(strongest.value), 1));
+    }
+
+    private static double NormalizeRange(double value, double min, double max)
+    {
+        if (max <= min)
+        {
+            return 0;
+        }
+
+        var normalized = ((value - min) / (max - min)) * 100d;
+        return ClampScore(normalized);
+    }
+
+    private static double ClampScore(double value)
+    {
+        return Math.Round(Math.Max(0, Math.Min(100, value)), 1);
+    }
+
+    private static string ResolvePetMood(double health, double engagement, double energy, double happiness)
+    {
+        if (health < 40)
+        {
+            return "unwell";
+        }
+
+        if (engagement < 40)
+        {
+            return "lonely";
+        }
+
+        if (energy < 40)
+        {
+            return "tired";
+        }
+
+        if (happiness >= 75 && health >= 65 && engagement >= 60 && energy >= 60)
+        {
+            return "thriving";
+        }
+
+        if (happiness >= 60)
+        {
+            return "happy";
+        }
+
+        return "neutral";
     }
 
     private static List<ActivityRecord> FilterVisibleActivities(IEnumerable<ActivityRecord> activities, bool stravaEnabled)
@@ -3069,4 +3360,23 @@ public static class DashboardModule
         string LongestActivityLabel,
         double LongestActivityScore,
         int ActiveDays);
+
+    private sealed record PetDaySnapshot(
+        double Energy,
+        double Happiness,
+        double Health,
+        double Engagement,
+        string Mood,
+        double? SleepHours,
+        double? SleepEfficiency,
+        double? CurrentMovement,
+        double? MovementBaseline,
+        double? MovementDeltaPct,
+        double? Rhr7,
+        double? Rhr30,
+        double? RhrDelta,
+        int EngagedDays,
+        string FlavorKey,
+        string FlavorDirection,
+        double FlavorMagnitude);
 }

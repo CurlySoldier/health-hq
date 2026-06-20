@@ -540,6 +540,51 @@ type DashboardInsights = {
   generatedAt: string;
 };
 
+type HealthPetMood = "thriving" | "happy" | "neutral" | "tired" | "unwell" | "lonely";
+type HealthPetFlavorKey = "energy" | "happiness" | "health" | "engagement";
+type HealthPetDirection = "up" | "down";
+
+type HealthPetResponse = {
+  day: string;
+  generatedAt: string;
+  isNightTime: boolean;
+  mood: HealthPetMood;
+  careStreak: number;
+  dailySummary: {
+    tone: "great" | "steady" | "rough";
+    message: string;
+  };
+  stats: {
+    energy: {
+      value: number;
+      sleepHours?: number;
+      sleepEfficiencyPct?: number;
+    };
+    happiness: {
+      value: number;
+      currentMovement?: number;
+      baseline30?: number;
+      deltaPct?: number;
+    };
+    health: {
+      value: number;
+      restingHr7?: number;
+      restingHr30?: number;
+      delta?: number;
+    };
+    engagement: {
+      value: number;
+      loggedDays: number;
+      windowDays: number;
+    };
+  };
+  flavorHint: {
+    key: HealthPetFlavorKey;
+    direction: HealthPetDirection;
+    magnitude: number;
+  };
+};
+
 type BodyMetricEntry = {
   id: string;
   day: string;
@@ -665,6 +710,9 @@ type ThemeManifest = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const THEME_STORAGE_KEY = "health-hq-theme";
 const THEME_LINK_ID = "theme-stylesheet";
+const PET_SUMMARY_ENABLED_KEY = "health-hq-pet-summary-enabled";
+const PET_SUMMARY_DISMISSED_DAY_KEY = "health-hq-pet-summary-dismissed-day";
+const PET_SUMMARY_EVENT = "health-hq-pet-summary-pref";
 const FALLBACK_THEMES: ThemeOption[] = [
   { id: "dark", label: "Dark", cssFile: "/themes/dark.css", isDefault: true },
   { id: "light", label: "Light", cssFile: "/themes/light.css" }
@@ -724,6 +772,130 @@ function resolveActiveThemeId(themes: ThemeOption[]) {
   }
 
   return resolveDefaultThemeId(themes);
+}
+
+function readPetSummaryEnabled() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(PET_SUMMARY_ENABLED_KEY) === "true";
+}
+
+function writePetSummaryEnabled(enabled: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(PET_SUMMARY_ENABLED_KEY, enabled ? "true" : "false");
+  window.dispatchEvent(new Event(PET_SUMMARY_EVENT));
+}
+
+function readPetSummaryDismissedDay() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(PET_SUMMARY_DISMISSED_DAY_KEY) ?? "";
+}
+
+function writePetSummaryDismissedDay(day: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(PET_SUMMARY_DISMISSED_DAY_KEY, day);
+  window.dispatchEvent(new Event(PET_SUMMARY_EVENT));
+}
+
+const PET_MOOD_LABELS: Record<HealthPetMood, string> = {
+  thriving: "Thriving",
+  happy: "Happy",
+  neutral: "Neutral",
+  tired: "Tired",
+  unwell: "Unwell",
+  lonely: "Lonely"
+};
+
+const PET_FLAVOR_TEMPLATES: Record<HealthPetFlavorKey, Record<HealthPetDirection, Array<(pet: HealthPetResponse) => string>>> = {
+  energy: {
+    up: [
+      (pet) => typeof pet.stats.energy.sleepHours === "number"
+        ? `Charged up after ${formatHours(pet.stats.energy.sleepHours)} of sleep.`
+        : "Charged up after a strong night.",
+      (pet) => `Energy is humming today after a strong night.`,
+      (pet) => `Plenty of spark in the tank this morning.`
+    ],
+    down: [
+      (pet) => `Running low today after a short night.`,
+      (pet) => `A little sleepy right now; tonight's rest can turn it around.`,
+      (pet) => `Energy is soft today, easing into recovery mode.`
+    ]
+  },
+  happiness: {
+    up: [
+      (pet) => `Big bounce from recent movement: ${formatSignedPct(pet.stats.happiness.deltaPct)} vs baseline.`,
+      () => "Movement is ahead of normal, so the mood is extra bright.",
+      () => "Strong activity trend today and the pet is feeling it."
+    ],
+    down: [
+      (pet) => `Movement is ${formatSignedPct(pet.stats.happiness.deltaPct)} vs baseline, so mood is a bit flat.`,
+      () => "A quieter activity day makes the pet a little mopey.",
+      () => "Below-normal movement today, keeping things calm and low-key."
+    ]
+  },
+  health: {
+    up: [
+      () => "Resting heart rate trend looks steady, so your pet seems strong.",
+      () => "Vitals trend is in a good lane right now.",
+      () => "Heart-rate baseline check looks favorable today."
+    ],
+    down: [
+      () => "Resting heart rate is running above baseline, so the pet looks off-color.",
+      () => "A mild stress signal is showing in resting heart rate trend.",
+      () => "Health trend is a little strained today; gentle recovery helps."
+    ]
+  },
+  engagement: {
+    up: [
+      (pet) => `Great check-in rhythm: ${pet.stats.engagement.loggedDays}/${pet.stats.engagement.windowDays} days logged.`,
+      () => "Consistent logging keeps your pet attentive and content.",
+      () => "Manual check-ins are strong this week; the pet feels cared for."
+    ],
+    down: [
+      (pet) => `Only ${pet.stats.engagement.loggedDays}/${pet.stats.engagement.windowDays} recent logging days, so the pet feels distant.`,
+      () => "Fewer recent check-ins make your pet seem a little lonely.",
+      () => "Logging cadence dipped this week; the pet is waiting for a check-in."
+    ]
+  }
+};
+
+function hashString(input: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index++) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return Math.abs(hash >>> 0);
+}
+
+function formatSignedPct(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "0%";
+  }
+
+  const asPercent = value * 100;
+  const sign = asPercent > 0 ? "+" : "";
+  return `${sign}${asPercent.toFixed(0)}%`;
+}
+
+function buildPetFlavorText(pet: HealthPetResponse) {
+  const direction = pet.flavorHint.direction;
+  const templates = PET_FLAVOR_TEMPLATES[pet.flavorHint.key][direction];
+  const seed = `${pet.day}:${pet.mood}:${pet.flavorHint.key}:${direction}`;
+  const selected = templates[hashString(seed) % templates.length];
+  return selected(pet);
 }
 
 function useFetch<T>(url: string) {
@@ -2131,6 +2303,89 @@ function sourceAllowsRouteMap(source: string) {
   return source.toLowerCase() === "strava" || source.toLowerCase() === "garmin";
 }
 
+function HealthPetAvatar({ mood, isNightTime, compact = false }: { mood: HealthPetMood; isNightTime: boolean; compact?: boolean }) {
+  return (
+    <div className={`pet-avatar pet-avatar-${mood} ${compact ? "pet-avatar-compact" : ""} ${isNightTime ? "pet-avatar-night" : ""}`} aria-hidden="true">
+      <div className="pet-ears" />
+      <div className="pet-face">
+        <span className="pet-eye pet-eye-left" />
+        <span className="pet-eye pet-eye-right" />
+        <span className="pet-mouth" />
+      </div>
+      <div className="pet-body" />
+    </div>
+  );
+}
+
+function HealthPetStatRow({ label, value }: { label: string; value: number }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div className="pet-stat-row">
+      <p className="muted">{label}</p>
+      <p className="value small">{Math.round(clamped)}</p>
+      <div className="pet-stat-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(clamped)} aria-label={label}>
+        <div className="pet-stat-fill" style={{ width: `${clamped}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function HealthPetWidget() {
+  const location = useLocation();
+  const { data } = useFetch<HealthPetResponse>("/api/dashboard/health-pet");
+  if (location.pathname === "/pet") {
+    return null;
+  }
+
+  const mood = data?.mood ?? "neutral";
+  return (
+    <Link className="pet-widget" to="/pet" aria-label="Open health pet">
+      <HealthPetAvatar mood={mood} isNightTime={Boolean(data?.isNightTime)} compact />
+      <div className="pet-widget-copy">
+        <p className="eyebrow">Health pet</p>
+        <p>{PET_MOOD_LABELS[mood]}</p>
+      </div>
+    </Link>
+  );
+}
+
+function HealthPetDailyBanner() {
+  const location = useLocation();
+  const { data } = useFetch<HealthPetResponse>("/api/dashboard/health-pet");
+  const [enabled, setEnabled] = React.useState(readPetSummaryEnabled);
+  const [dismissedDay, setDismissedDay] = React.useState(readPetSummaryDismissedDay);
+
+  React.useEffect(() => {
+    const refresh = () => {
+      setEnabled(readPetSummaryEnabled());
+      setDismissedDay(readPetSummaryDismissedDay());
+    };
+
+    window.addEventListener("storage", refresh);
+    window.addEventListener(PET_SUMMARY_EVENT, refresh);
+    return () => {
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener(PET_SUMMARY_EVENT, refresh);
+    };
+  }, []);
+
+  if (!enabled || !data || dismissedDay === data.day || location.pathname === "/pet") {
+    return null;
+  }
+
+  const toneClass = `pet-banner-${data.dailySummary.tone}`;
+
+  return (
+    <section className={`pet-banner ${toneClass}`}>
+      <p className="pet-banner-copy">{data.dailySummary.message}</p>
+      <div className="pet-banner-actions">
+        <Link className="button button-compact" to="/pet">Open pet</Link>
+        <button className="button button-compact" type="button" onClick={() => writePetSummaryDismissedDay(data.day)}>Dismiss</button>
+      </div>
+    </section>
+  );
+}
+
 function Shell({
   children
 }: {
@@ -2150,10 +2405,15 @@ function Shell({
             <Link to="/settings">Settings</Link>
             <Link to="/shopping">Shopping</Link>
             <Link to="/body">Body</Link>
+            <Link to="/pet">Pet</Link>
           </nav>
         </div>
       </header>
-      <main>{children}</main>
+      <main>
+        <HealthPetDailyBanner />
+        {children}
+      </main>
+      <HealthPetWidget />
     </div>
   );
 }
@@ -6024,6 +6284,80 @@ function BodyPage() {
   );
 }
 
+function PetPage() {
+  const { data, loading, error } = useFetch<HealthPetResponse>("/api/dashboard/health-pet");
+  const [dailySummaryEnabled, setDailySummaryEnabled] = React.useState(readPetSummaryEnabled);
+
+  if (loading) return <p>Loading health pet...</p>;
+  if (error || !data) return <p>Could not load health pet.</p>;
+
+  const flavorText = buildPetFlavorText(data);
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Health pet</p>
+          <h2>{PET_MOOD_LABELS[data.mood]} mood <span className="pet-streak">🔥 {data.careStreak}</span></h2>
+          <p className="muted">{flavorText}</p>
+        </div>
+        <p className="muted">Updated {formatDateTime(data.generatedAt)}</p>
+      </header>
+
+      <article className="panel controls">
+        <label className="pet-summary-toggle">
+          Daily pet summary banner
+          <input
+            type="checkbox"
+            checked={dailySummaryEnabled}
+            onChange={(event) => {
+              const next = event.target.checked;
+              setDailySummaryEnabled(next);
+              writePetSummaryEnabled(next);
+            }}
+          />
+        </label>
+        <p className="muted">Off by default. When on, an in-app summary appears once per day.</p>
+      </article>
+
+      <article className="panel pet-hero">
+        <HealthPetAvatar mood={data.mood} isNightTime={data.isNightTime} />
+      </article>
+
+      <article className="panel stack">
+        <h3>Daily state</h3>
+        <HealthPetStatRow label="Energy" value={data.stats.energy.value} />
+        <HealthPetStatRow label="Happiness" value={data.stats.happiness.value} />
+        <HealthPetStatRow label="Health" value={data.stats.health.value} />
+        <HealthPetStatRow label="Engagement" value={data.stats.engagement.value} />
+      </article>
+
+      <article className="panel stack pet-context-grid">
+        <div>
+          <p className="muted">Sleep</p>
+          <p>
+            {typeof data.stats.energy.sleepHours === "number" ? `${data.stats.energy.sleepHours.toFixed(2)} h` : "-"} at {typeof data.stats.energy.sleepEfficiencyPct === "number" ? `${data.stats.energy.sleepEfficiencyPct.toFixed(0)}%` : "-"} efficiency
+          </p>
+        </div>
+        <div>
+          <p className="muted">Activity vs baseline</p>
+          <p>{formatSignedPct(data.stats.happiness.deltaPct)}</p>
+        </div>
+        <div>
+          <p className="muted">Resting HR trend (7d vs 30d)</p>
+          <p>
+            {typeof data.stats.health.restingHr7 === "number" ? data.stats.health.restingHr7.toFixed(1) : "-"} / {typeof data.stats.health.restingHr30 === "number" ? data.stats.health.restingHr30.toFixed(1) : "-"} bpm
+          </p>
+        </div>
+        <div>
+          <p className="muted">Check-ins in last 7 days</p>
+          <p>{data.stats.engagement.loggedDays}/7 days</p>
+        </div>
+      </article>
+    </section>
+  );
+}
+
 function App() {
   const [themes, setThemes] = React.useState<ThemeOption[]>(FALLBACK_THEMES);
   const [themeId, setThemeId] = React.useState<string>(() => resolveActiveThemeId(FALLBACK_THEMES));
@@ -6103,6 +6437,7 @@ function App() {
           <Route path="/imports" element={<Navigate to="/settings#imports" replace />} />
           <Route path="/shopping" element={<ShoppingPage />} />
           <Route path="/body" element={<BodyPage />} />
+          <Route path="/pet" element={<PetPage />} />
         </Routes>
       </Shell>
     </BrowserRouter>
