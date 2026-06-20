@@ -699,6 +699,24 @@ public static class DashboardModule
             });
         });
 
+        app.MapGet("/api/dashboard/running", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveRunningDateRange(request, defaultDays: 90);
+            var (fromInclusive, toInclusive) = ToUtcDayRange(range.FromDay, range.ToDay);
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            var allActivities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+
+            var runningActivities = allActivities
+                .Where(IsRunningActivity)
+                .OrderBy(x => x.StartTime)
+                .ToArray();
+
+            var payload = BuildRunningInsightsPayload(range, runningActivities);
+            return Results.Ok(payload);
+        });
+
         app.MapGet("/api/dashboard/summary", async (IDocumentStore store, CancellationToken cancellationToken) =>
         {
             var summary = await BuildSummaryAsync(store, cancellationToken);
@@ -1957,6 +1975,1044 @@ public static class DashboardModule
 
         return $"{rounded}m";
     }
+
+    private static object BuildRunningInsightsPayload(DateRange range, IReadOnlyList<ActivityRecord> activities)
+    {
+        var runs = activities
+            .Select(ToRunningRunPoint)
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .OrderBy(x => x.StartTime)
+            .ToList();
+
+        var maxHrReference = runs
+            .Select(x => x.MaxHeartRate)
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .DefaultIfEmpty(190)
+            .Max();
+
+        runs = runs
+            .Select(run =>
+            {
+                var normalizedPaceElevation = run.PaceMinPerKm.HasValue && run.ElevationGainPerKm.HasValue
+                    ? Math.Round(Math.Max(0.1, run.PaceMinPerKm.Value - (run.ElevationGainPerKm.Value * 0.003)), 3)
+                    : (double?)null;
+
+                var normalizedPaceHr = run.PaceMinPerKm.HasValue && run.AverageHeartRate.HasValue
+                    ? Math.Round(Math.Max(0.1, run.PaceMinPerKm.Value * (run.AverageHeartRate.Value / (0.8 * Math.Max(maxHrReference, 1)))), 3)
+                    : (double?)null;
+
+                return run with
+                {
+                    NormalizedPaceElevation = normalizedPaceElevation,
+                    NormalizedPaceHr = normalizedPaceHr
+                };
+            })
+            .ToList();
+
+        var totalDistance = runs.Sum(x => x.DistanceKm ?? 0d);
+        var totalDuration = runs.Sum(x => x.DurationMinutes);
+        var avgPace = totalDistance > 0.001 ? totalDuration / totalDistance : (double?)null;
+
+        var weeklyDistance = runs
+            .GroupBy(x => GetIsoWeekStart(x.Day))
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.DistanceKm ?? 0d));
+
+        var currentWeek = GetIsoWeekStart(DateOnly.FromDateTime(DateTime.UtcNow.Date));
+        var weeklyStreak = 0;
+        for (var weekCursor = currentWeek; weekCursor >= currentWeek.AddYears(-3); weekCursor = weekCursor.AddDays(-7))
+        {
+            if (!weeklyDistance.TryGetValue(weekCursor, out var distance) || distance <= 0.001)
+            {
+                break;
+            }
+
+            weeklyStreak++;
+        }
+
+        var bestEverPace = runs
+            .Where(x => x.PaceMinPerKm.HasValue && (x.DistanceKm ?? 0) >= 1)
+            .OrderBy(x => x.PaceMinPerKm)
+            .ThenByDescending(x => x.DistanceKm)
+            .FirstOrDefault();
+
+        var pacePoints = runs
+            .Where(x => x.PaceMinPerKm.HasValue)
+            .Select((run, index) =>
+            {
+                var windowStart = Math.Max(0, index - 9);
+                var rollingWindow = runs
+                    .Skip(windowStart)
+                    .Take(index - windowStart + 1)
+                    .Select(x => x.PaceMinPerKm)
+                    .Where(x => x.HasValue)
+                    .Select(x => x!.Value)
+                    .ToArray();
+
+                return new
+                {
+                    day = run.Day,
+                    activityId = run.Id,
+                    paceMinPerKm = run.PaceMinPerKm,
+                    distanceKm = run.DistanceKm,
+                    averageHeartRate = run.AverageHeartRate,
+                    maxHeartRate = run.MaxHeartRate,
+                    elevationGainPerKm = run.ElevationGainPerKm,
+                    normalizedPaceElevation = run.NormalizedPaceElevation,
+                    normalizedPaceHr = run.NormalizedPaceHr,
+                    rolling10RunPace = rollingWindow.Length == 0 ? (double?)null : Math.Round(rollingWindow.Average(), 3)
+                };
+            })
+            .ToArray();
+
+        var weeklyVolume = BuildRunningWeeklyVolume(range, runs);
+        var monthlyVolume = BuildRunningMonthlyVolume(range, runs);
+        var efficiencyMonthly = BuildRunningEfficiencyMonthly(range, runs);
+        var fadeTrend = runs
+            .Where(x => x.FadeIndex.HasValue)
+            .Select(x => new
+            {
+                day = x.Day,
+                activityId = x.Id,
+                fadeIndex = Math.Round(x.FadeIndex!.Value, 3)
+            })
+            .ToArray();
+
+        var prTable = BuildRunningPrTable(runs);
+        var predictor = BuildRunningRacePrediction(range, runs);
+
+        return new
+        {
+            fromDay = range.FromDay,
+            toDay = range.ToDay,
+            summary = new
+            {
+                totalRuns = runs.Count,
+                totalDistanceKm = Math.Round(totalDistance, 2),
+                totalDurationMinutes = Math.Round(totalDuration, 1),
+                avgPaceMinPerKm = avgPace is null ? (double?)null : Math.Round(avgPace.Value, 3),
+                currentWeeklyStreak = weeklyStreak,
+                bestEverPace = bestEverPace is null
+                    ? null
+                    : new
+                    {
+                        day = bestEverPace.Day,
+                        activityId = bestEverPace.Id,
+                        paceMinPerKm = Math.Round(bestEverPace.PaceMinPerKm!.Value, 3),
+                        distanceKm = bestEverPace.DistanceKm
+                    }
+            },
+            paceTrend = new
+            {
+                points = pacePoints
+            },
+            volumeTrend = new
+            {
+                weekly = weeklyVolume,
+                monthly = monthlyVolume
+            },
+            efficiencyTrend = new
+            {
+                monthly = efficiencyMonthly
+            },
+            pacingConsistency = new
+            {
+                fadeTrend,
+                runs = runs.Select(x => new
+                {
+                    day = x.Day,
+                    activityId = x.Id,
+                    name = x.Name,
+                    fadeIndex = x.FadeIndex,
+                    splits = x.Splits.Select(split => new
+                    {
+                        split.DistanceKm,
+                        split.DurationMinutes,
+                        split.PaceMinPerKm,
+                        split.AverageHeartRate,
+                        split.ElevationGainM,
+                        split.CadenceSpm
+                    })
+                })
+            },
+            prTable,
+            racePredictor = predictor,
+            runs = runs.Select(x => new
+            {
+                day = x.Day,
+                activityId = x.Id,
+                name = x.Name,
+                distanceKm = x.DistanceKm,
+                durationMinutes = x.DurationMinutes,
+                paceMinPerKm = x.PaceMinPerKm,
+                averageHeartRate = x.AverageHeartRate,
+                maxHeartRate = x.MaxHeartRate,
+                elevationGainM = x.ElevationGainM,
+                cadenceSpm = x.CadenceSpm,
+                fadeIndex = x.FadeIndex,
+                efficiencyRatio = x.EfficiencyRatio,
+                zone34Ratio = x.Zone34Ratio,
+                elevationGainPerKm = x.ElevationGainPerKm,
+                normalizedPaceElevation = x.NormalizedPaceElevation,
+                normalizedPaceHr = x.NormalizedPaceHr
+            })
+        };
+    }
+
+    private static RunningRunPoint? ToRunningRunPoint(ActivityRecord activity)
+    {
+        var durationMinutes = Math.Round(Math.Max(0, GetEffectiveDurationMinutes(activity)), 3);
+        if (durationMinutes <= 0.01)
+        {
+            return null;
+        }
+
+        var distanceKm = activity.DistanceKm.HasValue && activity.DistanceKm.Value > 0
+            ? (double?)Math.Round(activity.DistanceKm.Value, 3)
+            : null;
+        var pace = distanceKm.HasValue && distanceKm.Value > 0.01
+            ? (double?)Math.Round(durationMinutes / distanceKm.Value, 3)
+            : null;
+
+        var elevationGain = ExtractElevationGainMeters(activity.RawJson);
+        var cadence = ExtractCadenceSpm(activity.RawJson);
+        var splits = ExtractSplits(activity.RawJson, durationMinutes, distanceKm);
+        var fadeIndex = ComputeFadeIndex(splits);
+        var efficiencyRatio = activity.AverageHeartRate.HasValue && pace.HasValue && pace.Value > 0
+            ? (double?)Math.Round(activity.AverageHeartRate.Value / pace.Value, 4)
+            : null;
+
+        var elevationGainPerKm = elevationGain.HasValue && distanceKm.HasValue && distanceKm.Value > 0.001
+            ? (double?)Math.Round(elevationGain.Value / distanceKm.Value, 3)
+            : null;
+
+        var zone34Ratio = ComputeZone34Ratio(activity);
+
+        return new RunningRunPoint(
+            Id: activity.Id,
+            Day: DateOnly.FromDateTime(activity.StartTime.UtcDateTime),
+            StartTime: activity.StartTime,
+            Name: string.IsNullOrWhiteSpace(activity.Name) ? NormalizeActivityType(activity.Type) : activity.Name!,
+            DurationMinutes: durationMinutes,
+            DistanceKm: distanceKm,
+            PaceMinPerKm: pace,
+            AverageHeartRate: activity.AverageHeartRate,
+            MaxHeartRate: activity.MaxHeartRate,
+            ElevationGainM: elevationGain,
+            CadenceSpm: cadence,
+            Splits: splits,
+            FadeIndex: fadeIndex,
+            EfficiencyRatio: efficiencyRatio,
+            ElevationGainPerKm: elevationGainPerKm,
+            NormalizedPaceElevation: null,
+            NormalizedPaceHr: null,
+            Zone34Ratio: zone34Ratio);
+    }
+
+    private static bool IsRunningActivity(ActivityRecord activity)
+    {
+        var normalized = NormalizeActivityType(activity.Type)
+            .Replace(' ', '_')
+            .Replace('-', '_');
+
+        return normalized switch
+        {
+            "running" => true,
+            "run" => true,
+            "trail_running" => true,
+            "trailrun" => true,
+            "trail_run" => true,
+            "treadmill_running" => true,
+            "treadmillrun" => true,
+            "virtual_run" => true,
+            "virtualrun" => true,
+            _ => normalized.Contains("run", StringComparison.OrdinalIgnoreCase)
+                 && !normalized.Contains("walk", StringComparison.OrdinalIgnoreCase)
+        };
+    }
+
+    private static DateRange ResolveRunningDateRange(HttpRequest request, int defaultDays)
+    {
+        var toDay = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        var fromRaw = request.Query["from"].FirstOrDefault();
+        var toRaw = request.Query["to"].FirstOrDefault();
+        if (DateOnly.TryParse(fromRaw, out var parsedFrom) && DateOnly.TryParse(toRaw, out var parsedTo))
+        {
+            if (parsedTo < parsedFrom)
+            {
+                (parsedFrom, parsedTo) = (parsedTo, parsedFrom);
+            }
+
+            if (parsedTo > toDay)
+            {
+                parsedTo = toDay;
+            }
+
+            if (parsedFrom < new DateOnly(2000, 1, 1))
+            {
+                parsedFrom = new DateOnly(2000, 1, 1);
+            }
+
+            return new DateRange(parsedFrom, parsedTo);
+        }
+
+        var rangeRaw = request.Query["range"].FirstOrDefault()?.Trim().ToLowerInvariant();
+        if (rangeRaw == "ytd")
+        {
+            return new DateRange(new DateOnly(toDay.Year, 1, 1), toDay);
+        }
+
+        if (rangeRaw == "all")
+        {
+            return new DateRange(new DateOnly(2000, 1, 1), toDay);
+        }
+
+        var days = rangeRaw switch
+        {
+            "90" => 90,
+            "30" => 30,
+            "365" => 365,
+            _ => defaultDays
+        };
+
+        return new DateRange(toDay.AddDays(-(days - 1)), toDay);
+    }
+
+    private static IReadOnlyList<object> BuildRunningWeeklyVolume(DateRange range, IReadOnlyList<RunningRunPoint> runs)
+    {
+        var firstWeek = GetIsoWeekStart(range.FromDay);
+        var lastWeek = GetIsoWeekStart(range.ToDay);
+        var byWeek = runs
+            .GroupBy(x => GetIsoWeekStart(x.Day))
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.DistanceKm ?? 0d));
+
+        var values = new List<(DateOnly WeekStart, double DistanceKm)>();
+        for (var week = firstWeek; week <= lastWeek; week = week.AddDays(7))
+        {
+            var distance = byWeek.TryGetValue(week, out var value) ? value : 0d;
+            values.Add((week, distance));
+        }
+
+        var lowStreak = 0;
+        var output = new List<object>(values.Count);
+        for (var index = 0; index < values.Count; index++)
+        {
+            var trailing = values
+                .Skip(Math.Max(0, index - 4))
+                .Take(index - Math.Max(0, index - 4))
+                .Select(x => x.DistanceKm)
+                .ToArray();
+
+            var trailingAverage = trailing.Length == 0 ? (double?)null : trailing.Average();
+            var spikeWarning = trailingAverage.HasValue
+                && trailingAverage.Value > 0.001
+                && values[index].DistanceKm > trailingAverage.Value * 1.3;
+
+            var low = trailingAverage.HasValue
+                && trailingAverage.Value > 0.001
+                && values[index].DistanceKm < trailingAverage.Value * 0.5;
+            lowStreak = low ? lowStreak + 1 : 0;
+
+            output.Add(new
+            {
+                weekStart = values[index].WeekStart,
+                weekKey = GetIsoWeekKey(values[index].WeekStart),
+                distanceKm = Math.Round(values[index].DistanceKm, 2),
+                trailing4WeekDistanceKm = trailingAverage.HasValue ? Math.Round(trailingAverage.Value, 2) : (double?)null,
+                spikeWarning,
+                detrainingWarning = lowStreak >= 3
+            });
+        }
+
+        return output;
+    }
+
+    private static IReadOnlyList<object> BuildRunningMonthlyVolume(DateRange range, IReadOnlyList<RunningRunPoint> runs)
+    {
+        var firstMonth = new DateOnly(range.FromDay.Year, range.FromDay.Month, 1);
+        var lastMonth = new DateOnly(range.ToDay.Year, range.ToDay.Month, 1);
+        var byMonth = runs
+            .GroupBy(x => new DateOnly(x.Day.Year, x.Day.Month, 1))
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.DistanceKm ?? 0d));
+
+        var output = new List<object>();
+        for (var month = firstMonth; month <= lastMonth; month = month.AddMonths(1))
+        {
+            output.Add(new
+            {
+                month,
+                label = month.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                distanceKm = Math.Round(byMonth.TryGetValue(month, out var value) ? value : 0d, 2)
+            });
+        }
+
+        return output;
+    }
+
+    private static IReadOnlyList<object> BuildRunningEfficiencyMonthly(DateRange range, IReadOnlyList<RunningRunPoint> runs)
+    {
+        var monthly = runs
+            .Where(x => x.EfficiencyRatio.HasValue)
+            .GroupBy(x => new DateOnly(x.Day.Year, x.Day.Month, 1))
+            .OrderBy(g => g.Key)
+            .Select(group => new
+            {
+                month = group.Key,
+                label = group.Key.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                ratio = Math.Round(group.Average(x => x.EfficiencyRatio!.Value), 4),
+                runCount = group.Count()
+            })
+            .ToArray();
+
+        if (monthly.Length > 0)
+        {
+            return monthly;
+        }
+
+        var firstMonth = new DateOnly(range.FromDay.Year, range.FromDay.Month, 1);
+        var lastMonth = new DateOnly(range.ToDay.Year, range.ToDay.Month, 1);
+        var output = new List<object>();
+        for (var month = firstMonth; month <= lastMonth; month = month.AddMonths(1))
+        {
+            output.Add(new
+            {
+                month,
+                label = month.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                ratio = (double?)null,
+                runCount = 0
+            });
+        }
+
+        return output;
+    }
+
+    private static object BuildRunningPrTable(IReadOnlyList<RunningRunPoint> runs)
+    {
+        var targets = new[]
+        {
+            new { Label = "1k", DistanceKm = 1d },
+            new { Label = "5k", DistanceKm = 5d },
+            new { Label = "10k", DistanceKm = 10d },
+            new { Label = "half", DistanceKm = 21.0975d },
+            new { Label = "marathon", DistanceKm = 42.195d }
+        };
+
+        var distancePrs = targets
+            .Select(target =>
+            {
+                var best = runs
+                    .Where(run => run.DistanceKm.HasValue
+                                  && run.DurationMinutes > 0
+                                  && run.DistanceKm.Value >= target.DistanceKm * 0.95
+                                  && run.DistanceKm.Value <= target.DistanceKm * 1.05)
+                    .Select(run => new
+                    {
+                        run.Id,
+                        run.Day,
+                        run.DistanceKm,
+                        run.DurationMinutes,
+                        EquivalentDurationMinutes = run.DurationMinutes * (target.DistanceKm / Math.Max(run.DistanceKm!.Value, 0.001)),
+                        run.PaceMinPerKm
+                    })
+                    .OrderBy(x => x.EquivalentDurationMinutes)
+                    .ThenBy(x => x.DurationMinutes)
+                    .FirstOrDefault();
+
+                return best is null
+                    ? new
+                    {
+                        label = target.Label,
+                        targetDistanceKm = target.DistanceKm,
+                        activityId = (string?)null,
+                        day = (DateOnly?)null,
+                        distanceKm = (double?)null,
+                        durationMinutes = (double?)null,
+                        equivalentDurationMinutes = (double?)null,
+                        paceMinPerKm = (double?)null
+                    }
+                    : new
+                    {
+                        label = target.Label,
+                        targetDistanceKm = target.DistanceKm,
+                        activityId = (string?)best.Id,
+                        day = (DateOnly?)best.Day,
+                        distanceKm = best.DistanceKm,
+                        durationMinutes = (double?)Math.Round(best.DurationMinutes, 2),
+                        equivalentDurationMinutes = (double?)Math.Round(best.EquivalentDurationMinutes, 2),
+                        paceMinPerKm = best.PaceMinPerKm
+                    };
+            })
+            .ToArray();
+
+        var longestRun = runs
+            .Where(x => x.DistanceKm.HasValue)
+            .OrderByDescending(x => x.DistanceKm)
+            .ThenBy(x => x.DurationMinutes)
+            .FirstOrDefault();
+
+        var mostElevation = runs
+            .Where(x => x.ElevationGainM.HasValue)
+            .OrderByDescending(x => x.ElevationGainM)
+            .ThenByDescending(x => x.DistanceKm)
+            .FirstOrDefault();
+
+        return new
+        {
+            distancePrs,
+            longestRun = longestRun is null
+                ? null
+                : new
+                {
+                    activityId = longestRun.Id,
+                    day = longestRun.Day,
+                    distanceKm = longestRun.DistanceKm,
+                    durationMinutes = longestRun.DurationMinutes,
+                    paceMinPerKm = longestRun.PaceMinPerKm
+                },
+            mostElevation = mostElevation is null
+                ? null
+                : new
+                {
+                    activityId = mostElevation.Id,
+                    day = mostElevation.Day,
+                    elevationGainM = mostElevation.ElevationGainM,
+                    distanceKm = mostElevation.DistanceKm,
+                    durationMinutes = mostElevation.DurationMinutes
+                }
+        };
+    }
+
+    private static object BuildRunningRacePrediction(DateRange range, IReadOnlyList<RunningRunPoint> runs)
+    {
+        var recentStart = range.ToDay.AddDays(-89);
+        var recent = runs
+            .Where(x => x.Day >= recentStart
+                        && x.DistanceKm.HasValue
+                        && x.DistanceKm.Value >= 3
+                        && x.DurationMinutes > 0)
+            .Select(x => new
+            {
+                Run = x,
+                Speed = x.DistanceKm!.Value / x.DurationMinutes
+            })
+            .OrderByDescending(x => x.Speed)
+            .ThenByDescending(x => x.Run.DistanceKm)
+            .FirstOrDefault();
+
+        if (recent is null)
+        {
+            return new
+            {
+                source = (object?)null,
+                predictions = Array.Empty<object>()
+            };
+        }
+
+        var sourceDistance = recent.Run.DistanceKm!.Value;
+        var sourceDuration = recent.Run.DurationMinutes;
+        var targets = new[]
+        {
+            new { Label = "5k", DistanceKm = 5d },
+            new { Label = "10k", DistanceKm = 10d },
+            new { Label = "half", DistanceKm = 21.0975d },
+            new { Label = "marathon", DistanceKm = 42.195d }
+        };
+
+        var predictions = targets
+            .Select(target =>
+            {
+                var predictedMinutes = sourceDuration * Math.Pow(target.DistanceKm / sourceDistance, 1.06);
+                var actual = runs
+                    .Where(run => run.DistanceKm.HasValue
+                                  && run.DistanceKm.Value >= target.DistanceKm * 0.95
+                                  && run.DistanceKm.Value <= target.DistanceKm * 1.05)
+                    .OrderBy(run => run.DurationMinutes)
+                    .FirstOrDefault();
+
+                return new
+                {
+                    label = target.Label,
+                    distanceKm = target.DistanceKm,
+                    predictedMinutes = Math.Round(predictedMinutes, 2),
+                    actualMinutes = actual is null ? (double?)null : Math.Round(actual.DurationMinutes, 2),
+                    actualActivityId = actual?.Id,
+                    deltaMinutes = actual is null ? (double?)null : Math.Round(actual.DurationMinutes - predictedMinutes, 2)
+                };
+            })
+            .ToArray();
+
+        return new
+        {
+            source = new
+            {
+                activityId = recent.Run.Id,
+                day = recent.Run.Day,
+                distanceKm = sourceDistance,
+                durationMinutes = sourceDuration,
+                paceMinPerKm = recent.Run.PaceMinPerKm
+            },
+            predictions
+        };
+    }
+
+    private static double? ComputeZone34Ratio(ActivityRecord activity)
+    {
+        var samples = activity.HeartRateSamples ?? ExtractHeartRateSamples(TryParseRawJson(activity.RawJson));
+        var maxHeartRate = activity.MaxHeartRate ?? 190;
+        var zones = ComputeHrZoneSeconds(samples, GetEffectiveDurationMinutes(activity), activity.AverageHeartRate, maxHeartRate);
+        if (zones.TotalSeconds <= 0)
+        {
+            return null;
+        }
+
+        return Math.Round((zones.Zone3Seconds + zones.Zone4Seconds) / zones.TotalSeconds, 4);
+    }
+
+    private static double? ComputeFadeIndex(IReadOnlyList<RunningSplitPoint> splits)
+    {
+        if (splits.Count < 2)
+        {
+            return null;
+        }
+
+        var totalDistance = splits.Sum(x => x.DistanceKm);
+        if (totalDistance <= 0.001)
+        {
+            return null;
+        }
+
+        var half = totalDistance / 2d;
+        var firstHalfMinutes = 0d;
+        var firstHalfDistance = 0d;
+        var secondHalfMinutes = 0d;
+        var secondHalfDistance = 0d;
+        var covered = 0d;
+
+        foreach (var split in splits)
+        {
+            var segmentDistance = Math.Max(0, split.DistanceKm);
+            var segmentMinutes = Math.Max(0, split.DurationMinutes);
+            if (segmentDistance <= 0.0001 || segmentMinutes <= 0.0001)
+            {
+                continue;
+            }
+
+            var start = covered;
+            var end = covered + segmentDistance;
+
+            var firstPartDistance = Math.Max(0, Math.Min(end, half) - start);
+            var secondPartDistance = Math.Max(0, end - Math.Max(start, half));
+            var minutesPerKm = segmentMinutes / segmentDistance;
+
+            if (firstPartDistance > 0)
+            {
+                firstHalfDistance += firstPartDistance;
+                firstHalfMinutes += firstPartDistance * minutesPerKm;
+            }
+
+            if (secondPartDistance > 0)
+            {
+                secondHalfDistance += secondPartDistance;
+                secondHalfMinutes += secondPartDistance * minutesPerKm;
+            }
+
+            covered = end;
+        }
+
+        if (firstHalfDistance <= 0.001 || secondHalfDistance <= 0.001)
+        {
+            return null;
+        }
+
+        var firstHalfPace = firstHalfMinutes / firstHalfDistance;
+        var secondHalfPace = secondHalfMinutes / secondHalfDistance;
+        return Math.Round(secondHalfPace - firstHalfPace, 4);
+    }
+
+    private static IReadOnlyList<RunningSplitPoint> ExtractSplits(string rawJson, double durationMinutes, double? totalDistanceKm)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return Array.Empty<RunningSplitPoint>();
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            if (!TryFindNamedArray(document.RootElement, out var splitsArray, "splits", "laps", "activity_laps", "activitylaps", "lap_summaries", "lapsummaries"))
+            {
+                return Array.Empty<RunningSplitPoint>();
+            }
+
+            var result = new List<RunningSplitPoint>();
+            foreach (var item in splitsArray.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var distanceKm = TryReadDistanceKmFromSplit(item);
+                var splitMinutes = TryReadDurationMinutesFromSplit(item);
+                var pace = TryReadNumericProperty(item, "pace", "avg_pace", "average_pace", "pace_min_per_km");
+                var hr = TryReadIntProperty(item, "avg_hr", "average_hr", "averageHeartRate", "heartrate");
+                var elevationGain = TryReadNumericProperty(item, "elevation_gain", "elevationGain", "total_ascent", "ascent");
+                var cadence = TryReadIntProperty(item, "cadence", "avg_cadence", "average_cadence", "averageRunningCadenceInStepsPerMinute");
+
+                if ((!distanceKm.HasValue || distanceKm.Value <= 0.001) && (!splitMinutes.HasValue || splitMinutes.Value <= 0.001))
+                {
+                    continue;
+                }
+
+                if (!splitMinutes.HasValue && distanceKm.HasValue && pace.HasValue)
+                {
+                    splitMinutes = pace.Value * distanceKm.Value;
+                }
+
+                if (!pace.HasValue && splitMinutes.HasValue && distanceKm.HasValue && distanceKm.Value > 0.001)
+                {
+                    pace = splitMinutes.Value / distanceKm.Value;
+                }
+
+                var finalDistance = distanceKm ?? 0;
+                var finalMinutes = splitMinutes ?? 0;
+                if (finalDistance <= 0.001 || finalMinutes <= 0.001)
+                {
+                    continue;
+                }
+
+                result.Add(new RunningSplitPoint(
+                    DistanceKm: Math.Round(finalDistance, 3),
+                    DurationMinutes: Math.Round(finalMinutes, 3),
+                    PaceMinPerKm: pace.HasValue ? Math.Round(pace.Value, 3) : (double?)null,
+                    AverageHeartRate: hr,
+                    ElevationGainM: elevationGain,
+                    CadenceSpm: cadence));
+            }
+
+            if (result.Count > 1)
+            {
+                return result;
+            }
+        }
+        catch
+        {
+            return Array.Empty<RunningSplitPoint>();
+        }
+
+        return Array.Empty<RunningSplitPoint>();
+    }
+
+    private static double? TryReadDistanceKmFromSplit(JsonElement split)
+    {
+        var value = TryReadNumericProperty(split,
+            "distance_km",
+            "distanceKm",
+            "lap_distance_km",
+            "distance",
+            "distance_m",
+            "distance_meter",
+            "distance_meters",
+            "lapDistance");
+
+        if (!value.HasValue || !double.IsFinite(value.Value) || value.Value <= 0)
+        {
+            return null;
+        }
+
+        if (value.Value > 1000)
+        {
+            return value.Value / 1000d;
+        }
+
+        if (value.Value > 60)
+        {
+            return value.Value / 1000d;
+        }
+
+        return value.Value;
+    }
+
+    private static double? TryReadDurationMinutesFromSplit(JsonElement split)
+    {
+        var candidates = new[]
+        {
+            "duration_minutes",
+            "durationMinutes",
+            "moving_time_minutes",
+            "elapsed_time_minutes",
+            "duration",
+            "time",
+            "moving_time",
+            "elapsed_time",
+            "duration_seconds",
+            "time_seconds",
+            "moving_time_seconds"
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (!TryReadNumericPropertyWithMatchedKey(split, out var matchedKey, out var value, candidate))
+            {
+                continue;
+            }
+
+            if (!double.IsFinite(value) || value <= 0)
+            {
+                continue;
+            }
+
+            var key = matchedKey.ToLowerInvariant();
+            if (key.Contains("hour", StringComparison.Ordinal))
+            {
+                return value * 60d;
+            }
+
+            if (key.Contains("minute", StringComparison.Ordinal) || key.EndsWith("_min", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            if (key.Contains("second", StringComparison.Ordinal) || key.EndsWith("_sec", StringComparison.Ordinal))
+            {
+                return value / 60d;
+            }
+
+            if (value >= 120)
+            {
+                return value / 60d;
+            }
+
+            return value;
+        }
+
+        return null;
+    }
+
+    private static double? ExtractElevationGainMeters(string rawJson)
+    {
+        return TryReadNumericPropertyFromJson(rawJson,
+            "elevation_gain",
+            "elevationGain",
+            "total_elevation_gain",
+            "totalAscent",
+            "ascent",
+            "total_ascent",
+            "totalClimb");
+    }
+
+    private static int? ExtractCadenceSpm(string rawJson)
+    {
+        return TryReadIntPropertyFromJson(rawJson,
+            "cadence",
+            "avg_cadence",
+            "average_cadence",
+            "averageCadence",
+            "averageRunningCadenceInStepsPerMinute");
+    }
+
+    private static double? TryReadNumericPropertyFromJson(string rawJson, params string[] candidates)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            return TryReadNumericProperty(document.RootElement, candidates);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryReadIntPropertyFromJson(string rawJson, params string[] candidates)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            return TryReadIntProperty(document.RootElement, candidates);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static double? TryReadNumericProperty(JsonElement node, params string[] candidates)
+    {
+        return TryReadNumericPropertyWithMatchedKey(node, out _, out var value, candidates)
+            ? value
+            : null;
+    }
+
+    private static bool TryReadNumericPropertyWithMatchedKey(JsonElement node, out string matchedKey, out double value, params string[] candidates)
+    {
+        matchedKey = string.Empty;
+        value = default;
+        var normalizedCandidates = candidates
+            .Select(NormalizeFieldKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return TryReadNumericPropertyCore(node, normalizedCandidates, out matchedKey, out value);
+    }
+
+    private static bool TryReadNumericPropertyCore(JsonElement node, HashSet<string> normalizedCandidates, out string matchedKey, out double value)
+    {
+        matchedKey = string.Empty;
+        value = default;
+
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in node.EnumerateObject())
+            {
+                var normalized = NormalizeFieldKey(property.Name);
+                if (normalizedCandidates.Contains(normalized)
+                    && TryReadDouble(property.Value, out value))
+                {
+                    matchedKey = property.Name;
+                    return true;
+                }
+
+                if (TryReadNumericPropertyCore(property.Value, normalizedCandidates, out matchedKey, out value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in node.EnumerateArray())
+            {
+                if (TryReadNumericPropertyCore(item, normalizedCandidates, out matchedKey, out value))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static int? TryReadIntProperty(JsonElement node, params string[] candidates)
+    {
+        var value = TryReadNumericProperty(node, candidates);
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        var rounded = (int)Math.Round(value.Value);
+        return rounded is > 0 and < 300 ? rounded : null;
+    }
+
+    private static bool TryReadDouble(JsonElement node, out double value)
+    {
+        value = default;
+        if (node.ValueKind == JsonValueKind.Number)
+        {
+            return node.TryGetDouble(out value);
+        }
+
+        if (node.ValueKind == JsonValueKind.String
+            && double.TryParse(node.GetString(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryFindNamedArray(JsonElement node, out JsonElement array, params string[] candidates)
+    {
+        array = default;
+        var normalizedCandidates = candidates
+            .Select(NormalizeFieldKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return TryFindNamedArrayCore(node, normalizedCandidates, out array);
+    }
+
+    private static bool TryFindNamedArrayCore(JsonElement node, HashSet<string> normalizedCandidates, out JsonElement array)
+    {
+        array = default;
+
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in node.EnumerateObject())
+            {
+                var normalized = NormalizeFieldKey(property.Name);
+                if (normalizedCandidates.Contains(normalized) && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    array = property.Value;
+                    return true;
+                }
+
+                if (TryFindNamedArrayCore(property.Value, normalizedCandidates, out array))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in node.EnumerateArray())
+            {
+                if (TryFindNamedArrayCore(item, normalizedCandidates, out array))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeFieldKey(string raw)
+    {
+        var chars = raw
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+        return new string(chars);
+    }
+
+    private sealed record RunningSplitPoint(
+        double DistanceKm,
+        double DurationMinutes,
+        double? PaceMinPerKm,
+        int? AverageHeartRate,
+        double? ElevationGainM,
+        int? CadenceSpm);
+
+    private sealed record RunningRunPoint(
+        string Id,
+        DateOnly Day,
+        DateTimeOffset StartTime,
+        string Name,
+        double DurationMinutes,
+        double? DistanceKm,
+        double? PaceMinPerKm,
+        int? AverageHeartRate,
+        int? MaxHeartRate,
+        double? ElevationGainM,
+        int? CadenceSpm,
+        IReadOnlyList<RunningSplitPoint> Splits,
+        double? FadeIndex,
+        double? EfficiencyRatio,
+        double? ElevationGainPerKm,
+        double? NormalizedPaceElevation,
+        double? NormalizedPaceHr,
+        double? Zone34Ratio);
 
     private static readonly object[] DailyMetricOptions =
     [

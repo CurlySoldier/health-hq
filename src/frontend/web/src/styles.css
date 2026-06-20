@@ -129,6 +129,14 @@
   --timeline-activity: #6ac4a7;
   --line-stress: #d57c64;
   --line-battery: #82d0f1;
+  --line-running-rolling: #f0bf78;
+  --line-running-efficiency: #7ed5b6;
+  --dot-running-efficiency: #9de8cf;
+  --line-running-fade: #92cdee;
+  --dot-running-fade: #9fdcf5;
+  --bar-running-volume: #6bb2d9;
+  --running-point-low: #65abcf;
+  --running-point-high: #77cfab;
 }
 
 * {
@@ -961,6 +969,57 @@ button:hover {
   stroke-dasharray: 4 3;
 }
 
+.line-running-rolling {
+  fill: none;
+  stroke: var(--line-running-rolling);
+  stroke-width: 2.2;
+  stroke-dasharray: 6 4;
+}
+
+.line-running-efficiency {
+  fill: none;
+  stroke: var(--line-running-efficiency);
+  stroke-width: 2.4;
+}
+
+.dot-running-efficiency {
+  fill: var(--dot-running-efficiency);
+}
+
+.line-running-fade {
+  fill: none;
+  stroke: var(--line-running-fade);
+  stroke-width: 2.2;
+}
+
+.dot-running-fade {
+  fill: var(--dot-running-fade);
+}
+
+.bar-running-volume {
+  fill: var(--bar-running-volume);
+}
+
+.split-row {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: minmax(84px, auto) minmax(160px, 1fr) minmax(90px, auto);
+  align-items: center;
+}
+
+.split-bar-shell {
+  height: 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-alt) 70%, var(--line) 30%);
+  overflow: hidden;
+}
+
+.split-bar {
+  height: 100%;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--running-point-low), var(--running-point-high));
+}
+
 .stat-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1338,6 +1397,10 @@ code {
   }
 
   .comparison-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .split-row {
     grid-template-columns: 1fr;
   }
 

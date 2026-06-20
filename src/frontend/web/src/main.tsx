@@ -276,6 +276,161 @@ type StressBodyBatteryResponse = {
   };
 };
 
+type RunningSummary = {
+  totalRuns: number;
+  totalDistanceKm: number;
+  totalDurationMinutes: number;
+  avgPaceMinPerKm?: number;
+  currentWeeklyStreak: number;
+  bestEverPace?: {
+    day: string;
+    activityId: string;
+    paceMinPerKm: number;
+    distanceKm?: number;
+  };
+};
+
+type RunningPacePoint = {
+  day: string;
+  activityId: string;
+  paceMinPerKm?: number;
+  distanceKm?: number;
+  averageHeartRate?: number;
+  maxHeartRate?: number;
+  elevationGainPerKm?: number;
+  normalizedPaceElevation?: number;
+  normalizedPaceHr?: number;
+  rolling10RunPace?: number;
+};
+
+type RunningWeeklyVolumePoint = {
+  weekStart: string;
+  weekKey: string;
+  distanceKm: number;
+  trailing4WeekDistanceKm?: number;
+  spikeWarning: boolean;
+  detrainingWarning: boolean;
+};
+
+type RunningMonthlyVolumePoint = {
+  month: string;
+  label: string;
+  distanceKm: number;
+};
+
+type RunningEfficiencyPoint = {
+  month: string;
+  label: string;
+  ratio?: number;
+  runCount: number;
+};
+
+type RunningSplitPoint = {
+  distanceKm: number;
+  durationMinutes: number;
+  paceMinPerKm?: number;
+  averageHeartRate?: number;
+  elevationGainM?: number;
+  cadenceSpm?: number;
+};
+
+type RunningPacingRun = {
+  day: string;
+  activityId: string;
+  name: string;
+  fadeIndex?: number;
+  splits: RunningSplitPoint[];
+};
+
+type RunningPrDistanceRow = {
+  label: string;
+  targetDistanceKm: number;
+  activityId?: string;
+  day?: string;
+  distanceKm?: number;
+  durationMinutes?: number;
+  equivalentDurationMinutes?: number;
+  paceMinPerKm?: number;
+};
+
+type RunningRacePredictionRow = {
+  label: string;
+  distanceKm: number;
+  predictedMinutes: number;
+  actualMinutes?: number;
+  actualActivityId?: string;
+  deltaMinutes?: number;
+};
+
+type RunningInsightsResponse = {
+  fromDay: string;
+  toDay: string;
+  summary: RunningSummary;
+  paceTrend: {
+    points: RunningPacePoint[];
+  };
+  volumeTrend: {
+    weekly: RunningWeeklyVolumePoint[];
+    monthly: RunningMonthlyVolumePoint[];
+  };
+  efficiencyTrend: {
+    monthly: RunningEfficiencyPoint[];
+  };
+  pacingConsistency: {
+    fadeTrend: Array<{
+      day: string;
+      activityId: string;
+      fadeIndex: number;
+    }>;
+    runs: RunningPacingRun[];
+  };
+  prTable: {
+    distancePrs: RunningPrDistanceRow[];
+    longestRun?: {
+      activityId: string;
+      day: string;
+      distanceKm?: number;
+      durationMinutes: number;
+      paceMinPerKm?: number;
+    };
+    mostElevation?: {
+      activityId: string;
+      day: string;
+      elevationGainM?: number;
+      distanceKm?: number;
+      durationMinutes: number;
+    };
+  };
+  racePredictor: {
+    source?: {
+      activityId: string;
+      day: string;
+      distanceKm: number;
+      durationMinutes: number;
+      paceMinPerKm?: number;
+    };
+    predictions: RunningRacePredictionRow[];
+  };
+  runs: Array<{
+    day: string;
+    activityId: string;
+    name: string;
+    distanceKm?: number;
+    durationMinutes: number;
+    paceMinPerKm?: number;
+    averageHeartRate?: number;
+    maxHeartRate?: number;
+    elevationGainM?: number;
+    cadenceSpm?: number;
+    fadeIndex?: number;
+    efficiencyRatio?: number;
+    zone34Ratio?: number;
+    elevationGainPerKm?: number;
+    normalizedPaceElevation?: number;
+    normalizedPaceHr?: number;
+  }>;
+};
+
 type ActivityDetail = {
   id: string;
   source: string;
@@ -493,6 +648,7 @@ type ActivitySort = "newest" | "oldest" | "load-high" | "duration-high";
 type MealSlot = "breakfast" | "lunch" | "dinner";
 type SettingsSectionId = "general" | "connections" | "imports" | "import-status";
 type InsightRangePreset = "30" | "90" | "365" | "custom";
+type RunningRangePreset = "90" | "ytd" | "all" | "custom";
 type HeatmapScaleMode = "relative" | "goal";
 
 type ThemeOption = {
@@ -885,6 +1041,12 @@ type InsightDateRange = {
   toDay: string;
 };
 
+type RunningDateRange = {
+  preset: RunningRangePreset;
+  fromDay: string;
+  toDay: string;
+};
+
 function createDateRangeFromPreset(preset: Exclude<InsightRangePreset, "custom">): InsightDateRange {
   const toDay = getLocalIsoDay();
   const offset = preset === "30" ? -29 : preset === "90" ? -89 : -364;
@@ -950,6 +1112,117 @@ function DateRangeSelector({
       ) : null}
     </section>
   );
+}
+
+function createRunningDateRangeFromPreset(preset: Exclude<RunningRangePreset, "custom">): RunningDateRange {
+  const toDay = getLocalIsoDay();
+  if (preset === "90") {
+    return {
+      preset,
+      fromDay: addDaysToIsoDay(toDay, -89),
+      toDay
+    };
+  }
+
+  if (preset === "ytd") {
+    return {
+      preset,
+      fromDay: `${toDay.slice(0, 4)}-01-01`,
+      toDay
+    };
+  }
+
+  return {
+    preset,
+    fromDay: "2000-01-01",
+    toDay
+  };
+}
+
+function buildRunningInsightQuery(range: RunningDateRange) {
+  const params = new URLSearchParams();
+  if (range.preset === "custom") {
+    params.set("from", range.fromDay);
+    params.set("to", range.toDay);
+    return params.toString();
+  }
+
+  params.set("range", range.preset);
+  return params.toString();
+}
+
+function RunningDateRangeSelector({
+  value,
+  onChange
+}: {
+  value: RunningDateRange;
+  onChange: (next: RunningDateRange) => void;
+}) {
+  const presets: RunningRangePreset[] = ["90", "ytd", "all", "custom"];
+
+  return (
+    <section className="panel controls">
+      <div className="chip-row">
+        {presets.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            className={`chip ${value.preset === preset ? "chip-active" : ""}`}
+            onClick={() => {
+              if (preset === "custom") {
+                onChange({ ...value, preset: "custom" });
+                return;
+              }
+
+              onChange(createRunningDateRangeFromPreset(preset));
+            }}
+          >
+            {preset === "90" ? "90 days" : preset === "ytd" ? "YTD" : preset === "all" ? "All" : "Custom"}
+          </button>
+        ))}
+      </div>
+
+      {value.preset === "custom" ? (
+        <div className="date-range-row">
+          <label>
+            From
+            <input type="date" value={value.fromDay} onChange={(event) => onChange({ ...value, fromDay: event.target.value })} />
+          </label>
+          <label>
+            To
+            <input type="date" value={value.toDay} onChange={(event) => onChange({ ...value, toDay: event.target.value })} />
+          </label>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function formatPaceMinPerKm(pace: number | undefined | null) {
+  if (typeof pace !== "number" || !Number.isFinite(pace) || pace <= 0) {
+    return "-";
+  }
+
+  const totalSeconds = Math.round(pace * 60);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")} /km`;
+}
+
+function formatDurationClock(totalMinutes: number | undefined | null) {
+  if (typeof totalMinutes !== "number" || !Number.isFinite(totalMinutes) || totalMinutes <= 0) {
+    return "-";
+  }
+
+  const totalSeconds = Math.round(totalMinutes * 60);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function getRecipeIdBySlot(day: PlannerDay, slot: MealSlot) {
@@ -2631,6 +2904,12 @@ function InsightsHubPage() {
 
       <div className="grid dashboard-grid">
         <article className="panel stack">
+          <h3>Running analytics</h3>
+          <p className="muted">Pace, volume, efficiency, pacing consistency, PR detection, and race projection in one running-specific screen.</p>
+          <Link className="button" to="/insights/running">Open running analytics</Link>
+        </article>
+
+        <article className="panel stack">
           <h3>Resting heart rate trend</h3>
           <p className="muted">Monitor 7-day and 30-day overlays and anomaly days above baseline + 1 SD.</p>
           <Link className="button" to="/insights/resting-heart-rate">Open RHR trend</Link>
@@ -3280,6 +3559,569 @@ function StressBatteryPage() {
       <article className="panel">
         <h3>Timeline</h3>
         <StressBatteryTimeline data={data} />
+      </article>
+    </section>
+  );
+}
+
+type RunningTip = {
+  id: string;
+  title: string;
+  message: string;
+  sectionId: string;
+  tone: "up" | "caution" | "low";
+};
+
+function average(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function generateTips(data: RunningInsightsResponse): RunningTip[] {
+  const tips: RunningTip[] = [];
+
+  const weekly = data.volumeTrend.weekly;
+  const efficiency = data.efficiencyTrend.monthly.map((point) => point.ratio).filter((value): value is number => typeof value === "number");
+  const recentWeekly = weekly.slice(-4).map((point) => point.distanceKm);
+  const priorWeekly = weekly.slice(Math.max(0, weekly.length - 8), Math.max(0, weekly.length - 4)).map((point) => point.distanceKm);
+  const recentEff = efficiency.slice(-3);
+  const priorEff = efficiency.slice(Math.max(0, efficiency.length - 6), Math.max(0, efficiency.length - 3));
+
+  const recentWeeklyAvg = average(recentWeekly);
+  const priorWeeklyAvg = average(priorWeekly);
+  const recentEffAvg = average(recentEff);
+  const priorEffAvg = average(priorEff);
+
+  if (
+    recentWeeklyAvg != null
+    && priorWeeklyAvg != null
+    && recentWeeklyAvg > priorWeeklyAvg * 1.1
+    && recentEffAvg != null
+    && priorEffAvg != null
+    && recentEffAvg >= priorEffAvg - 0.02
+  ) {
+    tips.push({
+      id: "easy-runs-too-hard",
+      title: "Volume is up but efficiency is flat",
+      message: "Your mileage increased without a matching efficiency gain. Easy days may be drifting too hard - slow base runs down.",
+      sectionId: "running-efficiency",
+      tone: "caution"
+    });
+  }
+
+  const fadeValues = data.pacingConsistency.fadeTrend.map((point) => point.fadeIndex);
+  const recentFade = average(fadeValues.slice(-5));
+  const priorFade = average(fadeValues.slice(Math.max(0, fadeValues.length - 10), Math.max(0, fadeValues.length - 5)));
+  if (recentFade != null && priorFade != null && recentFade > priorFade + 0.04) {
+    tips.push({
+      id: "fade-rising",
+      title: "Fade index is drifting upward",
+      message: "You are slowing more in second halves. Try starting first kilometer easier and finish with a controlled negative split.",
+      sectionId: "running-pacing",
+      tone: "caution"
+    });
+  }
+
+  const hasSpike = weekly.some((point) => point.spikeWarning);
+  const endedWithGap = weekly.slice(-2).every((point) => point.distanceKm < 1);
+  if (hasSpike && endedWithGap) {
+    tips.push({
+      id: "spike-gap-pattern",
+      title: "Spike then drop pattern detected",
+      message: "There is at least one >30% weekly spike followed by a gap. Cap progression to around 10% per week to reduce injury risk.",
+      sectionId: "running-volume",
+      tone: "caution"
+    });
+  }
+
+  const zoneRuns = data.runs.filter((run) => typeof run.zone34Ratio === "number");
+  const zone34Heavy = zoneRuns.length > 0 && zoneRuns.filter((run) => (run.zone34Ratio ?? 0) > 0.8).length / zoneRuns.length > 0.8;
+  if (zone34Heavy) {
+    tips.push({
+      id: "zone-balance",
+      title: "Most runs are drifting into moderate/hard zones",
+      message: "More than 80% of runs spend heavy time in zones 3-4. Consider a polarized split: more easy volume plus fewer quality hard sessions.",
+      sectionId: "running-efficiency",
+      tone: "low"
+    });
+  }
+
+  if (tips.length < 3) {
+    tips.push({
+      id: "keep-benchmarking",
+      title: "Run a benchmark effort soon",
+      message: "If you have not done a near-5k, 10k, or half-distance effort recently, schedule one to calibrate trends and race projections.",
+      sectionId: "running-prs",
+      tone: "up"
+    });
+  }
+
+  return tips.slice(0, 5);
+}
+
+function RunningPaceScatter({ points }: { points: RunningPacePoint[] }) {
+  const [mode, setMode] = React.useState<"raw" | "elevation" | "hr">("raw");
+  const enriched = points
+    .map((point) => {
+      const value = mode === "raw"
+        ? point.paceMinPerKm
+        : mode === "elevation"
+          ? point.normalizedPaceElevation ?? point.paceMinPerKm
+          : point.normalizedPaceHr ?? point.paceMinPerKm;
+      return { ...point, value };
+    })
+    .filter((point): point is RunningPacePoint & { value: number } => typeof point.value === "number");
+
+  if (enriched.length === 0) {
+    return <p className="empty">No pace points in this range.</p>;
+  }
+
+  const width = Math.max(560, enriched.length * 34);
+  const height = 260;
+  const pad = 26;
+  const minPace = Math.min(...enriched.map((point) => point.value));
+  const maxPace = Math.max(...enriched.map((point) => point.value));
+  const minDist = Math.min(...enriched.map((point) => point.distanceKm ?? 0));
+  const maxDist = Math.max(...enriched.map((point) => point.distanceKm ?? 0), 0.01);
+  const xStep = enriched.length > 1 ? (width - pad * 2) / (enriched.length - 1) : 1;
+  const xFor = (index: number) => pad + index * xStep;
+  const yFor = (pace: number) => {
+    if (Math.abs(maxPace - minPace) < 0.001) return height / 2;
+    return height - pad - ((maxPace - pace) / (maxPace - minPace)) * (height - pad * 2);
+  };
+
+  const rollingPath = enriched
+    .map((point, index) => {
+      const value = mode === "raw"
+        ? point.rolling10RunPace
+        : mode === "elevation"
+          ? point.normalizedPaceElevation
+          : point.normalizedPaceHr;
+      if (typeof value !== "number") {
+        return "";
+      }
+
+      return `${index === 0 ? "M" : "L"}${xFor(index)},${yFor(value)}`;
+    })
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className="stack">
+      <div className="chip-row">
+        <button type="button" className={`chip ${mode === "raw" ? "chip-active" : ""}`} onClick={() => setMode("raw")}>Raw pace</button>
+        <button type="button" className={`chip ${mode === "elevation" ? "chip-active" : ""}`} onClick={() => setMode("elevation")}>Normalized (elev)</button>
+        <button type="button" className={`chip ${mode === "hr" ? "chip-active" : ""}`} onClick={() => setMode("hr")}>Normalized (%max HR)</button>
+      </div>
+      <div className="chart-shell">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Running pace trend scatter">
+          <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="chart-axis" />
+          {rollingPath ? <path d={rollingPath} className="line-running-rolling" /> : null}
+          {enriched.map((point, index) => {
+            const distance = point.distanceKm ?? 0;
+            const ratio = maxDist - minDist < 0.001 ? 0.5 : (distance - minDist) / (maxDist - minDist);
+            const radius = 3 + ratio * 4;
+            return (
+              <a key={point.activityId} href={`/activity/${point.activityId}`}>
+                <circle
+                  cx={xFor(index)}
+                  cy={yFor(point.value)}
+                  r={radius}
+                  style={{ fill: `color-mix(in srgb, var(--running-point-low) ${100 - Math.round(ratio * 100)}%, var(--running-point-high) ${Math.round(ratio * 100)}%)` }}
+                >
+                  <title>{`${formatDay(point.day)} - ${formatPaceMinPerKm(point.value)} (${distance.toFixed(2)} km)`}</title>
+                </circle>
+              </a>
+            );
+          })}
+        </svg>
+      </div>
+      <p className="legend">Y-axis is inverted: faster pace appears higher. Dot size/color scales by distance. Line shows 10-run rolling average.</p>
+    </div>
+  );
+}
+
+function RunningVolumeChart({
+  weekly,
+  monthly
+}: {
+  weekly: RunningWeeklyVolumePoint[];
+  monthly: RunningMonthlyVolumePoint[];
+}) {
+  const [mode, setMode] = React.useState<"weekly" | "monthly">("weekly");
+  const weeklySorted = [...weekly].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+  const monthlySorted = [...monthly].sort((a, b) => a.month.localeCompare(b.month));
+  const points = mode === "weekly" ? weeklySorted : monthlySorted;
+
+  if (points.length === 0) {
+    return <p className="empty">No volume data in this range.</p>;
+  }
+
+  const width = Math.max(560, points.length * 34);
+  const height = 240;
+  const pad = 24;
+  const maxY = height - 32;
+  const minY = pad;
+  const maxDistance = Math.max(...points.map((point) => point.distanceKm), 1);
+  const gap = 8;
+  const barWidth = Math.max(8, Math.floor((width - pad * 2 - gap * (points.length - 1)) / points.length));
+
+  const trailingPath = mode === "weekly"
+    ? weeklySorted
+      .map((point, index) => {
+        if (typeof point.trailing4WeekDistanceKm !== "number") {
+          return "";
+        }
+
+        const x = pad + index * (barWidth + gap) + barWidth / 2;
+        const y = maxY - (point.trailing4WeekDistanceKm / maxDistance) * (maxY - minY);
+        return `${index === 0 ? "M" : "L"}${x},${y}`;
+      })
+      .filter(Boolean)
+      .join(" ")
+    : "";
+
+  return (
+    <div className="stack">
+      <div className="chip-row">
+        <button type="button" className={`chip ${mode === "weekly" ? "chip-active" : ""}`} onClick={() => setMode("weekly")}>Weekly</button>
+        <button type="button" className={`chip ${mode === "monthly" ? "chip-active" : ""}`} onClick={() => setMode("monthly")}>Monthly</button>
+      </div>
+      <div className="chart-shell">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Running volume trend">
+          <line x1={pad} y1={maxY} x2={width - pad} y2={maxY} className="chart-axis" />
+          {points.map((point, index) => {
+            const x = pad + index * (barWidth + gap);
+            const barHeight = Math.max(2, (point.distanceKm / maxDistance) * (maxY - minY));
+            const y = maxY - barHeight;
+            const isLabelPoint = index === 0 || index === points.length - 1 || index === Math.floor(points.length / 2);
+            const label = mode === "weekly"
+              ? formatIsoWeekLabel((point as RunningWeeklyVolumePoint).weekKey)
+              : (point as RunningMonthlyVolumePoint).label.slice(5);
+            return (
+              <g key={mode === "weekly" ? (point as RunningWeeklyVolumePoint).weekStart : (point as RunningMonthlyVolumePoint).month}>
+                <rect x={x} y={y} width={barWidth} height={barHeight} rx={3} className="bar-running-volume" />
+                {mode === "weekly" && (point as RunningWeeklyVolumePoint).spikeWarning ? <circle cx={x + barWidth / 2} cy={minY + 8} r={4} className="dot-warning" /> : null}
+                {mode === "weekly" && (point as RunningWeeklyVolumePoint).detrainingWarning ? <rect x={x + barWidth / 2 - 4} y={minY + 14} width={8} height={8} className="dot-detrain" /> : null}
+                {isLabelPoint ? <text x={x + barWidth / 2} y={height - 8} textAnchor="middle" className="chart-label">{label}</text> : null}
+              </g>
+            );
+          })}
+          {mode === "weekly" && trailingPath ? <path d={trailingPath} className="line-running-rolling" /> : null}
+        </svg>
+      </div>
+      <p className="legend">Weekly mode shows warning markers: dot = &gt;30% above trailing 4-week average, square = 3+ weeks below 50% of trailing average.</p>
+    </div>
+  );
+}
+
+function RunningEfficiencyChart({ points }: { points: RunningEfficiencyPoint[] }) {
+  const usable = points.filter((point) => typeof point.ratio === "number");
+  if (usable.length === 0) {
+    return <p className="empty">Not enough HR + pace runs to calculate efficiency trend.</p>;
+  }
+
+  const width = Math.max(540, usable.length * 46);
+  const height = 230;
+  const pad = 24;
+  const minRatio = Math.min(...usable.map((point) => point.ratio ?? 0));
+  const maxRatio = Math.max(...usable.map((point) => point.ratio ?? 0));
+  const xStep = usable.length > 1 ? (width - pad * 2) / (usable.length - 1) : 1;
+  const yFor = (ratio: number) => {
+    if (Math.abs(maxRatio - minRatio) < 0.0001) return height / 2;
+    return height - pad - ((ratio - minRatio) / (maxRatio - minRatio)) * (height - pad * 2);
+  };
+
+  const path = usable.map((point, index) => `${index === 0 ? "M" : "L"}${pad + index * xStep},${yFor(point.ratio ?? 0)}`).join(" ");
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Running efficiency monthly trend">
+        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="chart-axis" />
+        <path d={path} className="line-running-efficiency" />
+        {usable.map((point, index) => {
+          const x = pad + index * xStep;
+          const y = yFor(point.ratio ?? 0);
+          const isLabelPoint = index === 0 || index === usable.length - 1 || index === Math.floor(usable.length / 2);
+          return (
+            <g key={point.month}>
+              <circle cx={x} cy={y} r={3.6} className="dot-running-efficiency" />
+              {isLabelPoint ? <text x={x} y={height - 8} textAnchor="middle" className="chart-label">{point.label.slice(5)}</text> : null}
+            </g>
+          );
+        })}
+      </svg>
+      <p className="legend">Efficiency ratio = average HR / pace. A lower line over time generally indicates improving aerobic fitness.</p>
+    </div>
+  );
+}
+
+function RunningFadeTrendChart({ points }: { points: Array<{ day: string; activityId: string; fadeIndex: number }> }) {
+  if (points.length === 0) {
+    return <p className="empty">No split-derived fade index values available yet.</p>;
+  }
+
+  const ordered = [...points].sort((a, b) => a.day.localeCompare(b.day));
+  const width = Math.max(540, ordered.length * 34);
+  const height = 220;
+  const pad = 24;
+  const minValue = Math.min(...ordered.map((point) => point.fadeIndex));
+  const maxValue = Math.max(...ordered.map((point) => point.fadeIndex));
+  const xStep = ordered.length > 1 ? (width - pad * 2) / (ordered.length - 1) : 1;
+  const yFor = (value: number) => {
+    if (Math.abs(maxValue - minValue) < 0.0001) return height / 2;
+    return height - pad - ((value - minValue) / (maxValue - minValue)) * (height - pad * 2);
+  };
+
+  const path = ordered.map((point, index) => `${index === 0 ? "M" : "L"}${pad + index * xStep},${yFor(point.fadeIndex)}`).join(" ");
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Fade index trend">
+        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="chart-axis" />
+        <path d={path} className="line-running-fade" />
+        {ordered.map((point, index) => {
+          const x = pad + index * xStep;
+          const y = yFor(point.fadeIndex);
+          const isLabelPoint = index === 0 || index === ordered.length - 1 || index === Math.floor(ordered.length / 2);
+          return (
+            <a key={point.activityId} href={`/activity/${point.activityId}`}>
+              <circle cx={x} cy={y} r={3.2} className="dot-running-fade" />
+              {isLabelPoint ? <text x={x} y={height - 8} textAnchor="middle" className="chart-label">{formatDay(point.day)}</text> : null}
+            </a>
+          );
+        })}
+      </svg>
+      <p className="legend">Fade index = second-half pace minus first-half pace (min/km). Lower is better; negative means stronger finish.</p>
+    </div>
+  );
+}
+
+function RunningSplitBars({ run }: { run: RunningPacingRun }) {
+  if (run.splits.length === 0) {
+    return <p className="empty">No split records found for this run.</p>;
+  }
+
+  const maxPace = Math.max(...run.splits.map((split) => split.paceMinPerKm ?? 0), 0.01);
+  return (
+    <div className="stack">
+      {run.splits.map((split, index) => {
+        const pace = split.paceMinPerKm ?? 0;
+        const widthPct = Math.max(6, (pace / maxPace) * 100);
+        return (
+          <div key={`${run.activityId}-split-${index}`} className="split-row">
+            <span className="muted">Split {index + 1}</span>
+            <div className="split-bar-shell">
+              <div className="split-bar" style={{ width: `${widthPct}%` }} />
+            </div>
+            <span>{formatPaceMinPerKm(split.paceMinPerKm)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RunningInsightsPage() {
+  const [range, setRange] = React.useState<RunningDateRange>(() => createRunningDateRangeFromPreset("90"));
+  const [selectedPacingRunId, setSelectedPacingRunId] = React.useState("");
+  const query = React.useMemo(() => buildRunningInsightQuery(range), [range]);
+  const { data, loading, error } = useFetch<RunningInsightsResponse>(`/api/dashboard/running?${query}`);
+
+  React.useEffect(() => {
+    if (!data) {
+      return;
+    }
+
+    if (selectedPacingRunId && data.pacingConsistency.runs.some((run) => run.activityId === selectedPacingRunId)) {
+      return;
+    }
+
+    const firstWithSplits = data.pacingConsistency.runs.find((run) => run.splits.length > 0);
+    setSelectedPacingRunId(firstWithSplits?.activityId ?? data.pacingConsistency.runs[0]?.activityId ?? "");
+  }, [data, selectedPacingRunId]);
+
+  if (loading) return <p>Loading running analytics...</p>;
+  if (error || !data) return <p>Could not load running analytics.</p>;
+
+  const tips = generateTips(data);
+  const selectedRun = data.pacingConsistency.runs.find((run) => run.activityId === selectedPacingRunId);
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insights</p>
+          <h2>Running analytics</h2>
+          <p className="muted">Running-specific trends from pace, volume, efficiency, consistency, and PR history.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <RunningDateRangeSelector value={range} onChange={setRange} />
+
+      <section id="running-summary" className="grid cards-grid">
+        <article className="card">
+          <h3>Total runs</h3>
+          <p className="value">{data.summary.totalRuns}</p>
+          <p className="hint">In selected range</p>
+        </article>
+        <article className="card">
+          <h3>Total distance</h3>
+          <p className="value">{data.summary.totalDistanceKm.toFixed(1)} km</p>
+          <p className="hint">Running only</p>
+        </article>
+        <article className="card">
+          <h3>Total time</h3>
+          <p className="value small">{formatDurationMinutes(data.summary.totalDurationMinutes, true)}</p>
+          <p className="hint">Elapsed run time</p>
+        </article>
+        <article className="card">
+          <h3>Average pace</h3>
+          <p className="value small">{formatPaceMinPerKm(data.summary.avgPaceMinPerKm)}</p>
+          <p className="hint">Weighted by distance</p>
+        </article>
+        <article className="card">
+          <h3>Current weekly streak</h3>
+          <p className="value">{data.summary.currentWeeklyStreak}</p>
+          <p className="hint">Consecutive active weeks</p>
+        </article>
+        <article className="card">
+          <h3>Best ever pace</h3>
+          <p className="value small">{formatPaceMinPerKm(data.summary.bestEverPace?.paceMinPerKm)}</p>
+          <p className="hint">
+            {data.summary.bestEverPace ? <Link to={`/activity/${data.summary.bestEverPace.activityId}`}>{formatDay(data.summary.bestEverPace.day)}</Link> : "No qualifying run yet"}
+          </p>
+        </article>
+      </section>
+
+      <article id="running-pace" className="panel">
+        <h3>Pace trend</h3>
+        <RunningPaceScatter points={data.paceTrend.points} />
+      </article>
+
+      <article id="running-volume" className="panel">
+        <h3>Volume trend</h3>
+        <RunningVolumeChart weekly={data.volumeTrend.weekly} monthly={data.volumeTrend.monthly} />
+      </article>
+
+      <article id="running-tips" className="panel">
+        <h3>Coaching tips</h3>
+        <div className="grid cards-grid">
+          {tips.map((tip) => (
+            <article key={tip.id} className="card stack">
+              <p className={`badge badge-${tip.tone}`}>{tip.tone}</p>
+              <h4>{tip.title}</h4>
+              <p className="muted">{tip.message}</p>
+              <a className="button button-compact" href={`#${tip.sectionId}`}>Open source section</a>
+            </article>
+          ))}
+        </div>
+      </article>
+
+      <article id="running-efficiency" className="panel">
+        <h3>Efficiency trend</h3>
+        <RunningEfficiencyChart points={data.efficiencyTrend.monthly} />
+      </article>
+
+      <article id="running-pacing" className="panel stack">
+        <h3>Pacing consistency</h3>
+        <RunningFadeTrendChart points={data.pacingConsistency.fadeTrend} />
+        <section className="panel controls">
+          <label>
+            Per-run splits
+            <select value={selectedPacingRunId} onChange={(event) => setSelectedPacingRunId(event.target.value)}>
+              {data.pacingConsistency.runs.map((run) => (
+                <option key={run.activityId} value={run.activityId}>
+                  {formatDay(run.day)} - {run.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedRun ? <RunningSplitBars run={selectedRun} /> : <p className="empty">Select a run to inspect split pacing.</p>}
+        </section>
+      </article>
+
+      <article id="running-prs" className="panel stack">
+        <h3>PR table</h3>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Distance</th>
+                <th>Best time</th>
+                <th>Equivalent time</th>
+                <th>Pace</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.prTable.distancePrs.map((row) => (
+                <tr key={row.label}>
+                  <td>{row.label}</td>
+                  <td>{formatDurationClock(row.durationMinutes)}</td>
+                  <td>{formatDurationClock(row.equivalentDurationMinutes)}</td>
+                  <td>{formatPaceMinPerKm(row.paceMinPerKm)}</td>
+                  <td>{row.activityId && row.day ? <Link to={`/activity/${row.activityId}`}>{formatDay(row.day)}</Link> : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="grid cards-grid">
+          <article className="card">
+            <h3>Longest run</h3>
+            <p className="value small">{data.prTable.longestRun?.distanceKm ? `${data.prTable.longestRun.distanceKm.toFixed(2)} km` : "-"}</p>
+            <p className="hint">
+              {data.prTable.longestRun?.activityId && data.prTable.longestRun.day ? <Link to={`/activity/${data.prTable.longestRun.activityId}`}>{formatDay(data.prTable.longestRun.day)}</Link> : "No run yet"}
+            </p>
+          </article>
+          <article className="card">
+            <h3>Most elevation</h3>
+            <p className="value small">{typeof data.prTable.mostElevation?.elevationGainM === "number" ? `${Math.round(data.prTable.mostElevation.elevationGainM)} m` : "-"}</p>
+            <p className="hint">
+              {data.prTable.mostElevation?.activityId && data.prTable.mostElevation.day ? <Link to={`/activity/${data.prTable.mostElevation.activityId}`}>{formatDay(data.prTable.mostElevation.day)}</Link> : "No elevation data"}
+            </p>
+          </article>
+        </div>
+      </article>
+
+      <article id="running-race-predictor" className="panel stack">
+        <h3>Race predictor (Riegel)</h3>
+        {!data.racePredictor.source ? (
+          <p className="empty">Need a recent effort (3 km+) to estimate race times.</p>
+        ) : (
+          <>
+            <p className="muted">
+              Source effort: <Link to={`/activity/${data.racePredictor.source.activityId}`}>{formatDay(data.racePredictor.source.day)}</Link> - {data.racePredictor.source.distanceKm.toFixed(2)} km in {formatDurationClock(data.racePredictor.source.durationMinutes)}.
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Distance</th>
+                    <th>Predicted</th>
+                    <th>Actual recent</th>
+                    <th>Delta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.racePredictor.predictions.map((row) => (
+                    <tr key={row.label}>
+                      <td>{row.label}</td>
+                      <td>{formatDurationClock(row.predictedMinutes)}</td>
+                      <td>{row.actualActivityId && typeof row.actualMinutes === "number" ? <Link to={`/activity/${row.actualActivityId}`}>{formatDurationClock(row.actualMinutes)}</Link> : "-"}</td>
+                      <td>{typeof row.deltaMinutes === "number" ? `${row.deltaMinutes >= 0 ? "+" : ""}${row.deltaMinutes.toFixed(2)} min` : "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </article>
     </section>
   );
@@ -5239,6 +6081,7 @@ function App() {
           <Route path="/activities" element={<ActivitiesHubPage />} />
           <Route path="/sleep" element={<SleepHubPage />} />
           <Route path="/insights" element={<InsightsHubPage />} />
+          <Route path="/insights/running" element={<RunningInsightsPage />} />
           <Route path="/insights/resting-heart-rate" element={<RestingHeartRatePage />} />
           <Route path="/insights/sleep-stages" element={<SleepStagesPage />} />
           <Route path="/insights/steps-heatmap" element={<StepsHeatmapPage />} />

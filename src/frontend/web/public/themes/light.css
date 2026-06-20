@@ -129,4 +129,12 @@
   --timeline-activity: #41aa8d;
   --line-stress: #cb6d59;
   --line-battery: #4b9bc4;
+  --line-running-rolling: #b98341;
+  --line-running-efficiency: #2d8f76;
+  --dot-running-efficiency: #45a58b;
+  --line-running-fade: #3f86ab;
+  --dot-running-fade: #5499bf;
+  --bar-running-volume: #3c8fb8;
+  --running-point-low: #4f93ba;
+  --running-point-high: #4ab18f;
 }
