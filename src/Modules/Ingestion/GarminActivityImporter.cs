@@ -58,13 +58,22 @@ public sealed class GarminActivityImporter : IActivityIngestionProvider
             _logger.LogInformation("Garmin activities database not found at {Path}.", databasePath);
         }
 
-        if (latest == DateTimeOffset.MinValue)
+        if (imported > 0)
         {
-            latest = DateTimeOffset.UtcNow;
+            var newCheckpoint = new SyncCheckpoint(ProviderKey, ProviderKey, latest, DateTimeOffset.UtcNow);
+            await _store.UpsertAsync(DocumentTypes.SyncCheckpoint, ProviderKey, newCheckpoint, cancellationToken: cancellationToken);
         }
-
-        var newCheckpoint = new SyncCheckpoint(ProviderKey, ProviderKey, latest, DateTimeOffset.UtcNow);
-        await _store.UpsertAsync(DocumentTypes.SyncCheckpoint, ProviderKey, newCheckpoint, cancellationToken: cancellationToken);
+        else if (checkpoint is null)
+        {
+            _logger.LogInformation(
+                "Garmin sync imported no activities and no checkpoint exists. Leaving checkpoint unset so a future import can still backfill history.");
+        }
+        else
+        {
+            _logger.LogDebug(
+                "Garmin sync imported no new activities. Keeping checkpoint at {LastSyncedAt}.",
+                checkpoint.LastSyncedAt);
+        }
 
         return new SyncResult(imported, latest);
     }
@@ -199,11 +208,6 @@ public sealed class GarminActivityImporter : IActivityIngestionProvider
             {
                 latest = normalized.StartTime;
             }
-        }
-
-        if (latest == DateTimeOffset.MinValue)
-        {
-            latest = DateTimeOffset.UtcNow;
         }
 
         return (imported, latest);

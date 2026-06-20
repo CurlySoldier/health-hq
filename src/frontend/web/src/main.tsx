@@ -74,6 +74,208 @@ type SleepDailyTrendPoint = {
   sleepScore?: number;
 };
 
+type RestingHeartRatePoint = {
+  day: string;
+  restingHr?: number;
+  rolling7?: number;
+  rolling30?: number;
+  baseline30?: number;
+  stdDev30?: number;
+  isAnomaly: boolean;
+};
+
+type RestingHeartRateResponse = {
+  fromDay: string;
+  toDay: string;
+  availableDays: number;
+  points: RestingHeartRatePoint[];
+};
+
+type SleepStagesPoint = {
+  day: string;
+  hasData: boolean;
+  deepHours: number;
+  lightHours: number;
+  remHours: number;
+  awakeHours: number;
+  totalSleepHours: number;
+  rolling7SleepHours?: number;
+  bedtimeMinute?: number;
+  wakeMinute?: number;
+};
+
+type SleepStagesResponse = {
+  fromDay: string;
+  toDay: string;
+  availableDays: number;
+  points: SleepStagesPoint[];
+};
+
+type StepsHeatmapPoint = {
+  day: string;
+  steps: number;
+  hasData: boolean;
+};
+
+type StepsHeatmapResponse = {
+  fromDay: string;
+  toDay: string;
+  minSteps: number;
+  maxSteps: number;
+  defaultGoal: number;
+  points: StepsHeatmapPoint[];
+};
+
+type MonthlyLifeSnapshot = {
+  avgRestingHr?: number;
+  avgSleepHours?: number;
+  avgDeepSleepPct?: number;
+  totalSteps: number;
+  totalActiveMinutes: number;
+  longestActivityLabel: string;
+  longestActivityScore: number;
+  activeDays: number;
+};
+
+type MonthlyLifeResponse = {
+  month: string;
+  current: MonthlyLifeSnapshot;
+  previous: MonthlyLifeSnapshot;
+  deltas: {
+    avgRestingHr?: number;
+    avgSleepHours?: number;
+    avgDeepSleepPct?: number;
+    totalSteps: number;
+    totalActiveMinutes: number;
+    longestActivityScore: number;
+    activeDays: number;
+  };
+};
+
+type MetricOption = {
+  key: string;
+  label: string;
+};
+
+type CorrelationPoint = {
+  day: string;
+  compareDay: string;
+  x: number;
+  y: number;
+};
+
+type CorrelationResponse = {
+  fromDay: string;
+  toDay: string;
+  metricA: string;
+  metricB: string;
+  lag: number;
+  correlation?: number;
+  metricOptions: MetricOption[];
+  points: CorrelationPoint[];
+};
+
+type ActivityNextSleepCandidate = {
+  id: string;
+  startTime: string;
+  name: string;
+  type: string;
+  durationMinutes: number;
+  distanceKm?: number;
+};
+
+type ActivityNextSleepResponse = {
+  activity: ActivityDetail;
+  nightDay: string;
+  sleep?: {
+    day: string;
+    totalSleepHours: number;
+    deepSleepHours: number;
+    lightSleepHours: number;
+    remSleepHours: number;
+    awakeHours: number;
+    schedule?: {
+      bedtime?: string;
+      wakeTime?: string;
+    };
+  };
+  comparison: {
+    averageSleepHours?: number;
+    averageDeepHours?: number;
+    sleepDelta?: number;
+    deepDelta?: number;
+  };
+};
+
+type WeeklyTypeLoad = {
+  type: string;
+  durationMinutes: number;
+  distanceKm: number;
+  calories: number;
+  load: number;
+};
+
+type WeeklyLoadPoint = {
+  weekStart: string;
+  weekKey: string;
+  totalDurationMinutes: number;
+  totalDistanceKm: number;
+  totalCalories: number;
+  totalLoad: number;
+  byType: WeeklyTypeLoad[];
+  trailingAverageDuration?: number;
+  spikeWarning: boolean;
+  detrainingWarning: boolean;
+};
+
+type WeeklyTrainingLoadResponse = {
+  fromDay: string;
+  toDay: string;
+  points: WeeklyLoadPoint[];
+};
+
+type HrZonePoint = {
+  periodStart: string;
+  label: string;
+  zone1Minutes: number;
+  zone2Minutes: number;
+  zone3Minutes: number;
+  zone4Minutes: number;
+  zone5Minutes: number;
+  totalMinutes: number;
+};
+
+type HrZoneDistributionResponse = {
+  period: "week" | "month";
+  maxHr: number;
+  fromDay: string;
+  toDay: string;
+  points: HrZonePoint[];
+};
+
+type StressPoint = {
+  minute: number;
+  value: number;
+};
+
+type StressBodyBatteryResponse = {
+  day: string;
+  available: boolean;
+  message: string;
+  stressPoints: StressPoint[];
+  bodyBatteryPoints: StressPoint[];
+  activityBlocks: Array<{
+    id: string;
+    name: string;
+    startMinute: number;
+    endMinute: number;
+  }>;
+  sleepWindow?: {
+    startMinute: number;
+    endMinute: number;
+  };
+};
+
 type ActivityDetail = {
   id: string;
   source: string;
@@ -290,6 +492,8 @@ type WindowDays = 7 | 30 | 90;
 type ActivitySort = "newest" | "oldest" | "load-high" | "duration-high";
 type MealSlot = "breakfast" | "lunch" | "dinner";
 type SettingsSectionId = "general" | "connections" | "imports" | "import-status";
+type InsightRangePreset = "30" | "90" | "365" | "custom";
+type HeatmapScaleMode = "relative" | "goal";
 
 type ThemeOption = {
   id: string;
@@ -429,6 +633,61 @@ function formatDateTime(value: string) {
 
 function getTodayIsoDay() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function getLocalIsoDay(referenceDate = new Date()) {
+  const tzOffset = referenceDate.getTimezoneOffset() * 60_000;
+  return new Date(referenceDate.getTime() - tzOffset).toISOString().slice(0, 10);
+}
+
+function addDaysToIsoDay(isoDay: string, offsetDays: number) {
+  const base = new Date(`${isoDay}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + offsetDays);
+  return base.toISOString().slice(0, 10);
+}
+
+function formatHours(hours: number | undefined) {
+  if (typeof hours !== "number" || !Number.isFinite(hours)) {
+    return "-";
+  }
+  return `${hours.toFixed(2)} h`;
+}
+
+function formatHourMinute(totalMinutes: number) {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function formatIsoWeekLabel(weekKey: string) {
+  const [year, week] = weekKey.split("-W");
+  if (!year || !week) {
+    return weekKey;
+  }
+  return `W${week} '${year.slice(-2)}`;
+}
+
+function shiftedMinuteOfDay(totalMinutes: number) {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  return normalized < 18 * 60 ? normalized + 1440 : normalized;
+}
+
+function buildInsightQuery(range: {
+  preset: InsightRangePreset;
+  fromDay: string;
+  toDay: string;
+}) {
+  if (range.preset === "custom") {
+    const params = new URLSearchParams();
+    params.set("from", range.fromDay);
+    params.set("to", range.toDay);
+    return params.toString();
+  }
+
+  const params = new URLSearchParams();
+  params.set("range", range.preset);
+  return params.toString();
 }
 
 function getCurrentIsoWeekKey(referenceDate = new Date()) {
@@ -620,6 +879,79 @@ const SLOT_LABELS: Array<{ key: MealSlot; label: string }> = [
   { key: "dinner", label: "Dinner" }
 ];
 
+type InsightDateRange = {
+  preset: InsightRangePreset;
+  fromDay: string;
+  toDay: string;
+};
+
+function createDateRangeFromPreset(preset: Exclude<InsightRangePreset, "custom">): InsightDateRange {
+  const toDay = getLocalIsoDay();
+  const offset = preset === "30" ? -29 : preset === "90" ? -89 : -364;
+  return {
+    preset,
+    fromDay: addDaysToIsoDay(toDay, offset),
+    toDay
+  };
+}
+
+function DateRangeSelector({
+  value,
+  onChange,
+  includeCustom = true
+}: {
+  value: InsightDateRange;
+  onChange: (next: InsightDateRange) => void;
+  includeCustom?: boolean;
+}) {
+  const presets: InsightRangePreset[] = includeCustom ? ["30", "90", "365", "custom"] : ["30", "90", "365"];
+
+  return (
+    <section className="panel controls">
+      <div className="chip-row">
+        {presets.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            className={`chip ${value.preset === preset ? "chip-active" : ""}`}
+            onClick={() => {
+              if (preset === "custom") {
+                onChange({ ...value, preset: "custom" });
+                return;
+              }
+
+              onChange(createDateRangeFromPreset(preset));
+            }}
+          >
+            {preset === "custom" ? "Custom" : `${preset} days`}
+          </button>
+        ))}
+      </div>
+
+      {value.preset === "custom" ? (
+        <div className="date-range-row">
+          <label>
+            From
+            <input
+              type="date"
+              value={value.fromDay}
+              onChange={(event) => onChange({ ...value, fromDay: event.target.value })}
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={value.toDay}
+              onChange={(event) => onChange({ ...value, toDay: event.target.value })}
+            />
+          </label>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function getRecipeIdBySlot(day: PlannerDay, slot: MealSlot) {
   if (slot === "breakfast") {
     return day.breakfastRecipeId;
@@ -763,6 +1095,522 @@ function SleepBars({ points }: { points: SleepDailyTrendPoint[] }) {
           );
         })}
       </svg>
+    </div>
+  );
+}
+
+function RestingHeartRateLines({ points }: { points: RestingHeartRatePoint[] }) {
+  const ordered = [...points].sort((a, b) => a.day.localeCompare(b.day));
+  const hrValues = ordered.flatMap((point) => [point.restingHr, point.rolling7, point.rolling30]).filter(
+    (value): value is number => typeof value === "number"
+  );
+
+  if (ordered.length === 0 || hrValues.length === 0) {
+    return <p className="empty">No resting heart rate values found in this date range.</p>;
+  }
+
+  const width = Math.max(540, ordered.length * 28);
+  const height = 220;
+  const pad = 24;
+  const minY = pad;
+  const maxY = height - 32;
+  const minHr = Math.min(...hrValues) - 2;
+  const maxHr = Math.max(...hrValues) + 2;
+  const xStep = ordered.length > 1 ? (width - pad * 2) / (ordered.length - 1) : 1;
+  const xFor = (index: number) => pad + xStep * index;
+  const yFor = (hr: number) => {
+    if (Math.abs(maxHr - minHr) < 0.001) {
+      return (minY + maxY) / 2;
+    }
+
+    return maxY - ((hr - minHr) / (maxHr - minHr)) * (maxY - minY);
+  };
+
+  const pathFor = (selector: (point: RestingHeartRatePoint) => number | undefined) => {
+    let hasSegment = false;
+    return ordered
+      .map((point, index) => {
+        const value = selector(point);
+        if (typeof value !== "number") {
+          hasSegment = false;
+          return "";
+        }
+
+        const command = hasSegment ? "L" : "M";
+        hasSegment = true;
+        return `${command}${xFor(index)},${yFor(value)}`;
+      })
+      .join(" ")
+      .trim();
+  };
+
+  const restingPath = pathFor((point) => point.restingHr);
+  const rolling7Path = pathFor((point) => point.rolling7);
+  const rolling30Path = pathFor((point) => point.rolling30);
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Resting heart rate trend with rolling averages">
+        <line x1={pad} y1={maxY} x2={width - pad} y2={maxY} className="chart-axis" />
+        {rolling30Path ? <path d={rolling30Path} className="line-rhr-30" /> : null}
+        {rolling7Path ? <path d={rolling7Path} className="line-rhr-7" /> : null}
+        {restingPath ? <path d={restingPath} className="line-rhr" /> : null}
+        {ordered.map((point, index) => {
+          if (typeof point.restingHr !== "number") {
+            return null;
+          }
+
+          const isLabelPoint = index === 0 || index === ordered.length - 1 || index === Math.floor(ordered.length / 2);
+          return (
+            <g key={`${point.day}-${index}`}>
+              <circle cx={xFor(index)} cy={yFor(point.restingHr)} r={point.isAnomaly ? 4.2 : 2.8} className={point.isAnomaly ? "dot-anomaly" : "dot-rhr"} />
+              {isLabelPoint ? (
+                <text x={xFor(index)} y={height - 9} textAnchor="middle" className="chart-label">
+                  {formatDay(point.day)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+      <p className="legend">Solid: daily RHR, dashed: 7d avg, dotted: 30d avg. Red markers show days above baseline + 1 SD.</p>
+    </div>
+  );
+}
+
+function SleepStagesStackedBars({ points }: { points: SleepStagesPoint[] }) {
+  const ordered = [...points].sort((a, b) => a.day.localeCompare(b.day));
+  if (ordered.length === 0) {
+    return <p className="empty">No sleep stage data yet.</p>;
+  }
+
+  const width = Math.max(520, ordered.length * 26);
+  const height = 222;
+  const pad = 24;
+  const maxY = height - 32;
+  const minY = pad;
+  const chartHeight = maxY - minY;
+  const gap = 7;
+  const barWidth = Math.max(5, Math.floor((width - pad * 2 - gap * (ordered.length - 1)) / ordered.length));
+  const maxTotal = Math.max(...ordered.map((point) => point.totalSleepHours + point.awakeHours), 1);
+
+  let totalHasSegment = false;
+  const linePath = ordered
+    .map((point, index) => {
+      if (!point.hasData) {
+        totalHasSegment = false;
+        return "";
+      }
+      const x = pad + index * (barWidth + gap) + barWidth / 2;
+      const y = maxY - ((point.totalSleepHours / maxTotal) * chartHeight);
+      const command = totalHasSegment ? "L" : "M";
+      totalHasSegment = true;
+      return `${command}${x},${y}`;
+    })
+    .join(" ")
+    .trim();
+
+  let rollingHasSegment = false;
+  const rollingPath = ordered
+    .map((point, index) => {
+      if (typeof point.rolling7SleepHours !== "number") {
+        rollingHasSegment = false;
+        return "";
+      }
+      const x = pad + index * (barWidth + gap) + barWidth / 2;
+      const y = maxY - ((point.rolling7SleepHours / maxTotal) * chartHeight);
+      const command = rollingHasSegment ? "L" : "M";
+      rollingHasSegment = true;
+      return `${command}${x},${y}`;
+    })
+    .join(" ")
+    .trim();
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Sleep stage composition over time">
+        <line x1={pad} y1={maxY} x2={width - pad} y2={maxY} className="chart-axis" />
+        {ordered.map((point, index) => {
+          const x = pad + index * (barWidth + gap);
+          const isLabelPoint = index === 0 || index === ordered.length - 1 || index === Math.floor(ordered.length / 2);
+
+          if (!point.hasData) {
+            return (
+              <g key={`${point.day}-empty`}>
+                <rect x={x} y={maxY - 2} width={barWidth} height={2} rx={1} className="bar-missing" />
+                {isLabelPoint ? (
+                  <text x={x + barWidth / 2} y={height - 9} textAnchor="middle" className="chart-label">
+                    {formatDay(point.day)}
+                  </text>
+                ) : null}
+              </g>
+            );
+          }
+
+          const segments = [
+            { className: "bar-stage-deep", value: point.deepHours },
+            { className: "bar-stage-light", value: point.lightHours },
+            { className: "bar-stage-rem", value: point.remHours },
+            { className: "bar-stage-awake", value: point.awakeHours }
+          ];
+
+          let currentY = maxY;
+
+          return (
+            <g key={point.day}>
+              {segments.map((segment) => {
+                const segmentHeight = Math.max(1, (segment.value / maxTotal) * chartHeight);
+                currentY -= segmentHeight;
+                return <rect key={`${point.day}-${segment.className}`} x={x} y={currentY} width={barWidth} height={segmentHeight} rx={2} className={segment.className} />;
+              })}
+              {isLabelPoint ? (
+                <text x={x + barWidth / 2} y={height - 9} textAnchor="middle" className="chart-label">
+                  {formatDay(point.day)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+        {linePath ? <path d={linePath} className="line-sleep-total" /> : null}
+        {rollingPath ? <path d={rollingPath} className="line-sleep-rolling" /> : null}
+      </svg>
+      <p className="legend">Stacked bars: deep/light/REM/awake. Solid line: total sleep. Dashed line: 7-day average.</p>
+    </div>
+  );
+}
+
+function SleepScheduleScatter({ points }: { points: SleepStagesPoint[] }) {
+  const ordered = [...points].sort((a, b) => a.day.localeCompare(b.day));
+  const withSchedule = ordered.filter((point) => typeof point.bedtimeMinute === "number" || typeof point.wakeMinute === "number");
+  if (withSchedule.length < 2) {
+    return <p className="empty">Not enough bedtime/wake-time points in this range.</p>;
+  }
+
+  const width = Math.max(520, ordered.length * 26);
+  const height = 210;
+  const pad = 24;
+  const maxY = height - 34;
+  const minY = pad;
+  const xStep = ordered.length > 1 ? (width - pad * 2) / (ordered.length - 1) : 1;
+
+  const yFor = (minute: number) => {
+    const shifted = shiftedMinuteOfDay(minute);
+    const minMinute = 18 * 60;
+    const maxMinute = 36 * 60;
+    return maxY - ((shifted - minMinute) / (maxMinute - minMinute)) * (maxY - minY);
+  };
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Bedtime and wake-time consistency">
+        <line x1={pad} y1={maxY} x2={width - pad} y2={maxY} className="chart-axis" />
+        {[18 * 60, 24 * 60, 30 * 60, 36 * 60].map((tick) => (
+          <g key={tick}>
+            <line x1={pad} y1={yFor(tick)} x2={width - pad} y2={yFor(tick)} className="chart-gridline" />
+            <text x={6} y={yFor(tick) + 4} className="chart-label">{formatHourMinute(tick)}</text>
+          </g>
+        ))}
+        {ordered.map((point, index) => {
+          const x = pad + index * xStep;
+          const isLabelPoint = index === 0 || index === ordered.length - 1 || index === Math.floor(ordered.length / 2);
+          return (
+            <g key={point.day}>
+              {typeof point.bedtimeMinute === "number" ? <circle cx={x} cy={yFor(point.bedtimeMinute)} r={3.6} className="dot-bedtime" /> : null}
+              {typeof point.wakeMinute === "number" ? <circle cx={x} cy={yFor(point.wakeMinute)} r={3.6} className="dot-waketime" /> : null}
+              {isLabelPoint ? (
+                <text x={x} y={height - 8} textAnchor="middle" className="chart-label">
+                  {formatDay(point.day)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+      <p className="legend">Blue dots: bedtime. Gold dots: wake time. Y-axis runs 18:00 to 12:00 to expose irregular schedules.</p>
+    </div>
+  );
+}
+
+function StepsCalendarHeatmap({
+  points,
+  scaleMode,
+  goal
+}: {
+  points: StepsHeatmapPoint[];
+  scaleMode: HeatmapScaleMode;
+  goal: number;
+}) {
+  if (points.length === 0) {
+    return <p className="empty">No steps data available for this range.</p>;
+  }
+
+  const ordered = [...points].sort((a, b) => a.day.localeCompare(b.day));
+  const firstDate = new Date(`${ordered[0].day}T00:00:00Z`);
+  const firstDayOfWeek = firstDate.getUTCDay();
+  const padded: Array<StepsHeatmapPoint | null> = [];
+  for (let i = 0; i < firstDayOfWeek; i++) {
+    padded.push(null);
+  }
+  padded.push(...ordered);
+
+  const maxSteps = Math.max(...ordered.map((point) => point.steps), 1);
+  const minSteps = Math.min(...ordered.filter((point) => point.hasData).map((point) => point.steps), 0);
+  const cells = padded.map((point, index) => {
+    if (!point) {
+      return <span key={`pad-${index}`} className="heatmap-cell heatmap-cell-empty" />;
+    }
+
+    const ratio =
+      scaleMode === "goal"
+        ? Math.min(1, point.steps / Math.max(goal, 1))
+        : maxSteps <= minSteps
+          ? 0
+          : Math.max(0, Math.min(1, (point.steps - minSteps) / (maxSteps - minSteps)));
+    const intensity = point.hasData ? ratio : 0;
+    const bg = point.hasData
+      ? `color-mix(in srgb, var(--heatmap-low) ${100 - Math.round(intensity * 100)}%, var(--heatmap-high) ${Math.round(intensity * 100)}%)`
+      : "var(--heatmap-empty)";
+
+    return (
+      <Link
+        key={point.day}
+        to={`/steps/${point.day}`}
+        className="heatmap-cell"
+        style={{ background: bg }}
+        title={`${formatDay(point.day)}: ${point.steps.toLocaleString()} steps`}
+        aria-label={`${point.day} with ${point.steps.toLocaleString()} steps`}
+      >
+        <span className="sr-only">{point.steps}</span>
+      </Link>
+    );
+  });
+
+  return (
+    <div className="stack">
+      <div className="heatmap-grid">{cells}</div>
+      <p className="legend">Tap any day for exact steps; from there you can jump into daily sleep details.</p>
+    </div>
+  );
+}
+
+function CorrelationScatter({ points, metricA, metricB }: { points: CorrelationPoint[]; metricA: string; metricB: string }) {
+  if (points.length < 2) {
+    return <p className="empty">Not enough paired days to compute a meaningful correlation.</p>;
+  }
+
+  const width = Math.max(420, points.length * 16);
+  const height = 250;
+  const pad = 28;
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const xFor = (value: number) => {
+    if (Math.abs(maxX - minX) < 0.0001) return width / 2;
+    return pad + ((value - minX) / (maxX - minX)) * (width - pad * 2);
+  };
+  const yFor = (value: number) => {
+    if (Math.abs(maxY - minY) < 0.0001) return height / 2;
+    return height - pad - ((value - minY) / (maxY - minY)) * (height - pad * 2);
+  };
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${metricA} vs ${metricB} scatter plot`}>
+        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="chart-axis" />
+        <line x1={pad} y1={pad} x2={pad} y2={height - pad} className="chart-axis" />
+        {points.map((point) => (
+          <circle key={`${point.day}-${point.compareDay}`} cx={xFor(point.x)} cy={yFor(point.y)} r={3.4} className="dot-correlation" />
+        ))}
+      </svg>
+      <p className="legend">X: {metricA}. Y: {metricB}. Each dot is one lag-aligned day pair.</p>
+    </div>
+  );
+}
+
+function WeeklyLoadChart({ points }: { points: WeeklyLoadPoint[] }) {
+  if (points.length === 0) {
+    return <p className="empty">No weekly load data available for this range.</p>;
+  }
+
+  const sorted = [...points].sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+  const width = Math.max(560, sorted.length * 40);
+  const height = 240;
+  const pad = 24;
+  const maxY = height - 34;
+  const minY = pad;
+  const chartHeight = maxY - minY;
+  const gap = 10;
+  const barWidth = Math.max(8, Math.floor((width - pad * 2 - gap * (sorted.length - 1)) / sorted.length));
+  const maxDuration = Math.max(...sorted.map((point) => point.totalDurationMinutes), 1);
+  const palette = ["var(--stack-a)", "var(--stack-b)", "var(--stack-c)", "var(--stack-d)", "var(--stack-e)"];
+  const typeColor = new Map<string, string>();
+  let colorIndex = 0;
+
+  sorted.forEach((point) => {
+    point.byType.forEach((segment) => {
+      if (!typeColor.has(segment.type)) {
+        typeColor.set(segment.type, palette[colorIndex % palette.length]);
+        colorIndex++;
+      }
+    });
+  });
+
+  let trendHasSegment = false;
+  const trendPath = sorted
+    .map((point, index) => {
+      const x = pad + index * (barWidth + gap) + barWidth / 2;
+      const y = maxY - ((point.totalDurationMinutes / maxDuration) * chartHeight);
+      const command = trendHasSegment ? "L" : "M";
+      trendHasSegment = true;
+      return `${command}${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Weekly training load with warning flags">
+        <line x1={pad} y1={maxY} x2={width - pad} y2={maxY} className="chart-axis" />
+        {sorted.map((point, index) => {
+          const x = pad + index * (barWidth + gap);
+          let cursorY = maxY;
+          const isLabelPoint = index === 0 || index === sorted.length - 1 || index === Math.floor(sorted.length / 2);
+          return (
+            <g key={point.weekStart}>
+              {point.byType.map((segment) => {
+                const segmentHeight = Math.max(1, (segment.durationMinutes / maxDuration) * chartHeight);
+                cursorY -= segmentHeight;
+                return (
+                  <rect
+                    key={`${point.weekStart}-${segment.type}`}
+                    x={x}
+                    y={cursorY}
+                    width={barWidth}
+                    height={segmentHeight}
+                    rx={2}
+                    style={{ fill: typeColor.get(segment.type) }}
+                  />
+                );
+              })}
+              {point.spikeWarning ? <circle cx={x + barWidth / 2} cy={minY + 6} r={4} className="dot-warning" /> : null}
+              {point.detrainingWarning ? <rect x={x + barWidth / 2 - 4} y={minY + 12} width={8} height={8} className="dot-detrain" /> : null}
+              {isLabelPoint ? (
+                <text x={x + barWidth / 2} y={height - 8} textAnchor="middle" className="chart-label">
+                  {formatIsoWeekLabel(point.weekKey)}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+        <path d={trendPath} className="line-trend" />
+      </svg>
+      <p className="legend">Dot = spike warning (&gt;50% over trailing 4-week avg). Square = de-training warning (&lt;25% for 2+ weeks).</p>
+    </div>
+  );
+}
+
+function HrZoneStackedBars({ points }: { points: HrZonePoint[] }) {
+  if (points.length === 0) {
+    return <p className="empty">No HR zone distribution available in this range.</p>;
+  }
+
+  const ordered = [...points].sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+  const maxTotal = Math.max(...ordered.map((point) => point.totalMinutes), 1);
+
+  return (
+    <div className="stack">
+      {ordered.map((point) => {
+        const segments = [
+          { label: "Z1", value: point.zone1Minutes, className: "zone-1" },
+          { label: "Z2", value: point.zone2Minutes, className: "zone-2" },
+          { label: "Z3", value: point.zone3Minutes, className: "zone-3" },
+          { label: "Z4", value: point.zone4Minutes, className: "zone-4" },
+          { label: "Z5", value: point.zone5Minutes, className: "zone-5" }
+        ];
+
+        return (
+          <div key={point.periodStart} className="zone-row">
+            <div className="zone-row-header">
+              <strong>{point.label}</strong>
+              <span className="muted">{Math.round(point.totalMinutes)} min total</span>
+            </div>
+            <div className="zone-bar-shell">
+              {segments.map((segment) => (
+                <div
+                  key={`${point.periodStart}-${segment.label}`}
+                  className={`zone-segment ${segment.className}`}
+                  style={{ width: `${Math.max(0, (segment.value / maxTotal) * 100)}%` }}
+                  title={`${segment.label}: ${segment.value.toFixed(1)} min`}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      <p className="legend">Zone model uses 5 bands from % of configured max heart rate.</p>
+    </div>
+  );
+}
+
+function StressBatteryTimeline({ data }: { data: StressBodyBatteryResponse }) {
+  if (!data.available) {
+    return <p className="empty">{data.message}</p>;
+  }
+
+  const width = 760;
+  const height = 230;
+  const pad = 26;
+  const minY = pad;
+  const maxY = height - 30;
+  const xFor = (minute: number) => pad + (Math.max(0, Math.min(1440, minute)) / 1440) * (width - pad * 2);
+  const values = [...data.stressPoints.map((point) => point.value), ...data.bodyBatteryPoints.map((point) => point.value)];
+  const minValue = values.length === 0 ? 0 : Math.min(...values);
+  const maxValue = values.length === 0 ? 100 : Math.max(...values);
+  const yFor = (value: number) => {
+    if (Math.abs(maxValue - minValue) < 0.001) {
+      return (minY + maxY) / 2;
+    }
+    return maxY - ((value - minValue) / (maxValue - minValue)) * (maxY - minY);
+  };
+
+  const makePath = (points: StressPoint[]) => {
+    if (points.length === 0) return "";
+    return points
+      .sort((a, b) => a.minute - b.minute)
+      .map((point, index) => `${index === 0 ? "M" : "L"}${xFor(point.minute)},${yFor(point.value)}`)
+      .join(" ");
+  };
+
+  const stressPath = makePath(data.stressPoints);
+  const batteryPath = makePath(data.bodyBatteryPoints);
+
+  return (
+    <div className="chart-shell">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Stress and body battery over the day">
+        <line x1={pad} y1={maxY} x2={width - pad} y2={maxY} className="chart-axis" />
+        {data.sleepWindow ? (
+          <rect
+            x={xFor(data.sleepWindow.startMinute)}
+            y={minY}
+            width={Math.max(2, xFor(data.sleepWindow.endMinute) - xFor(data.sleepWindow.startMinute))}
+            height={maxY - minY}
+            className="timeline-sleep"
+          />
+        ) : null}
+        {data.activityBlocks.map((activity) => (
+          <rect
+            key={activity.id}
+            x={xFor(activity.startMinute)}
+            y={maxY + 3}
+            width={Math.max(2, xFor(activity.endMinute) - xFor(activity.startMinute))}
+            height={8}
+            className="timeline-activity"
+          />
+        ))}
+        {stressPath ? <path d={stressPath} className="line-stress" /> : null}
+        {batteryPath ? <path d={batteryPath} className="line-battery" /> : null}
+      </svg>
+      <p className="legend">Stress line + body battery line with sleep shading and activity blocks at the bottom.</p>
     </div>
   );
 }
@@ -1024,6 +1872,7 @@ function Shell({
             <Link to="/">Dashboard</Link>
             <Link to="/activities">Activities</Link>
             <Link to="/sleep">Sleep</Link>
+            <Link to="/insights">Insights</Link>
             <Link to="/training">Training</Link>
             <Link to="/settings">Settings</Link>
             <Link to="/shopping">Shopping</Link>
@@ -1764,6 +2613,673 @@ function SleepDetailPage() {
       <article className="panel">
         <h3>Raw payload</h3>
         <pre>{JSON.stringify(data.raw, null, 2)}</pre>
+      </article>
+    </section>
+  );
+}
+
+function InsightsHubPage() {
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insights</p>
+          <h2>Trend and recovery explorer</h2>
+          <p className="muted">Use the dedicated views for resting HR, sleep stages, daily activity rhythm, and monthly deltas.</p>
+        </div>
+      </header>
+
+      <div className="grid dashboard-grid">
+        <article className="panel stack">
+          <h3>Resting heart rate trend</h3>
+          <p className="muted">Monitor 7-day and 30-day overlays and anomaly days above baseline + 1 SD.</p>
+          <Link className="button" to="/insights/resting-heart-rate">Open RHR trend</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Sleep stages over time</h3>
+          <p className="muted">Inspect deep/light/REM/awake composition with total and rolling sleep trends.</p>
+          <Link className="button" to="/insights/sleep-stages">Open sleep stages</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Steps calendar heatmap</h3>
+          <p className="muted">Spot streaks and slumps with a contributions-style view of daily steps.</p>
+          <Link className="button" to="/insights/steps-heatmap">Open steps heatmap</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Monthly life dashboard</h3>
+          <p className="muted">See month-over-month deltas and deep-link into each detailed view.</p>
+          <Link className="button" to="/insights/monthly">Open monthly dashboard</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Cross-metric correlation explorer</h3>
+          <p className="muted">Test your own hypotheses with lag-aware daily metric scatter plots.</p>
+          <Link className="button" to="/insights/correlation">Open correlation explorer</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Activity to next-night sleep</h3>
+          <p className="muted">Pick a workout and inspect the immediately following night’s sleep profile.</p>
+          <Link className="button" to="/insights/activity-next-sleep">Open activity to sleep detail</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Weekly training load summary</h3>
+          <p className="muted">Track trend direction with spike and de-training warnings.</p>
+          <Link className="button" to="/insights/weekly-load">Open weekly load summary</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>HR zone distribution</h3>
+          <p className="muted">Understand time in zone by week or month with configurable max HR.</p>
+          <Link className="button" to="/insights/hr-zones">Open HR zone distribution</Link>
+        </article>
+
+        <article className="panel stack">
+          <h3>Body battery and stress (optional)</h3>
+          <p className="muted">Checks whether stress/body battery series are present and charts the day if available.</p>
+          <Link className="button" to="/insights/stress-battery">Open stress timeline</Link>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function RestingHeartRatePage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("90"));
+  const query = React.useMemo(() => buildInsightQuery(range), [range]);
+  const { data, loading, error } = useFetch<RestingHeartRateResponse>(`/api/dashboard/resting-heart-rate?${query}`);
+
+  if (loading) return <p>Loading resting heart rate trends...</p>;
+  if (error || !data) return <p>Could not load resting heart rate trends.</p>;
+
+  const anomalies = data.points.filter((point) => point.isAnomaly).length;
+  const latest = [...data.points].reverse().find((point) => typeof point.restingHr === "number");
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 1</p>
+          <h2>Resting heart rate trend</h2>
+          <p className="muted">Long-term cardiovascular trend with anomaly highlighting for illness, overtraining, or poor recovery.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <div className="grid cards-grid">
+        <article className="card">
+          <h3>Days with data</h3>
+          <p className="value">{data.availableDays}</p>
+          <p className="hint">In selected range</p>
+        </article>
+        <article className="card">
+          <h3>Anomaly days</h3>
+          <p className="value">{anomalies}</p>
+          <p className="hint">RHR above 30d avg + 1 SD</p>
+        </article>
+        <article className="card">
+          <h3>Latest RHR</h3>
+          <p className="value">{latest?.restingHr ?? "-"}</p>
+          <p className="hint">Most recent day with value</p>
+        </article>
+        <article className="card">
+          <h3>Latest 30d avg</h3>
+          <p className="value">{latest?.rolling30?.toFixed(1) ?? "-"}</p>
+          <p className="hint">Baseline trendline</p>
+        </article>
+      </div>
+
+      <article className="panel">
+        <h3>RHR with 7d/30d rolling averages</h3>
+        <RestingHeartRateLines points={data.points} />
+      </article>
+    </section>
+  );
+}
+
+function SleepStagesPage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("90"));
+  const query = React.useMemo(() => buildInsightQuery(range), [range]);
+  const { data, loading, error } = useFetch<SleepStagesResponse>(`/api/dashboard/sleep-stages?${query}`);
+
+  if (loading) return <p>Loading sleep stage trends...</p>;
+  if (error || !data) return <p>Could not load sleep stage trends.</p>;
+
+  const recordedDays = data.points.filter((point) => point.hasData);
+  const averageSleep = recordedDays.length === 0
+    ? null
+    : recordedDays.reduce((sum, point) => sum + point.totalSleepHours, 0) / recordedDays.length;
+  const latestRecorded = recordedDays.length === 0 ? null : recordedDays[recordedDays.length - 1];
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 2</p>
+          <h2>Sleep stages over time</h2>
+          <p className="muted">Track sleep quality trends, stage composition, and schedule consistency.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <div className="grid cards-grid">
+        <article className="card">
+          <h3>Nights with data</h3>
+          <p className="value">{recordedDays.length}</p>
+          <p className="hint">Selected range</p>
+        </article>
+        <article className="card">
+          <h3>Average sleep</h3>
+          <p className="value">{averageSleep ? `${averageSleep.toFixed(2)} h` : "-"}</p>
+          <p className="hint">Per night</p>
+        </article>
+        <article className="card">
+          <h3>Latest total</h3>
+          <p className="value">{formatHours(latestRecorded?.totalSleepHours)}</p>
+          <p className="hint">Most recent night</p>
+        </article>
+        <article className="card">
+          <h3>Latest 7d avg</h3>
+          <p className="value">{formatHours(latestRecorded?.rolling7SleepHours)}</p>
+          <p className="hint">Rolling mean</p>
+        </article>
+      </div>
+
+      <article className="panel">
+        <h3>Stage composition + total sleep overlay</h3>
+        <SleepStagesStackedBars points={data.points} />
+      </article>
+
+      <article className="panel">
+        <h3>Bedtime and wake-time consistency</h3>
+        <SleepScheduleScatter points={data.points} />
+      </article>
+    </section>
+  );
+}
+
+function StepsHeatmapPage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("365"));
+  const [scaleMode, setScaleMode] = React.useState<HeatmapScaleMode>("relative");
+  const [goal, setGoal] = React.useState(10000);
+  const query = React.useMemo(() => buildInsightQuery(range), [range]);
+  const { data, loading, error } = useFetch<StepsHeatmapResponse>(`/api/dashboard/steps-heatmap?${query}`);
+
+  React.useEffect(() => {
+    if (data?.defaultGoal) {
+      setGoal(data.defaultGoal);
+    }
+  }, [data?.defaultGoal]);
+
+  if (loading) return <p>Loading steps heatmap...</p>;
+  if (error || !data) return <p>Could not load steps heatmap.</p>;
+
+  const activeDays = data.points.filter((point) => point.hasData && point.steps > 0).length;
+  const bestDay = [...data.points].sort((a, b) => b.steps - a.steps)[0];
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 3</p>
+          <h2>Steps calendar heatmap</h2>
+          <p className="muted">GitHub-style daily activity map for streaks, slumps, and seasonal patterns.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <section className="panel controls">
+        <div className="chip-row">
+          <button type="button" className={`chip ${scaleMode === "relative" ? "chip-active" : ""}`} onClick={() => setScaleMode("relative")}>
+            Personal min/max
+          </button>
+          <button type="button" className={`chip ${scaleMode === "goal" ? "chip-active" : ""}`} onClick={() => setScaleMode("goal")}>
+            Goal-based
+          </button>
+        </div>
+        {scaleMode === "goal" ? (
+          <div className="goal-row">
+            <label>
+              Daily goal (steps)
+              <input
+                type="number"
+                min={1000}
+                step={500}
+                value={goal}
+                onChange={(event) => setGoal(Math.max(1000, Number(event.target.value) || 10000))}
+              />
+            </label>
+          </div>
+        ) : null}
+      </section>
+
+      <div className="grid cards-grid">
+        <article className="card">
+          <h3>Active days</h3>
+          <p className="value">{activeDays}</p>
+          <p className="hint">Days with recorded steps</p>
+        </article>
+        <article className="card">
+          <h3>Best day</h3>
+          <p className="value small">{bestDay ? bestDay.steps.toLocaleString() : "-"}</p>
+          <p className="hint">{bestDay ? formatDay(bestDay.day) : "No data"}</p>
+        </article>
+        <article className="card">
+          <h3>Range max</h3>
+          <p className="value">{data.maxSteps.toLocaleString()}</p>
+          <p className="hint">Highest daily count</p>
+        </article>
+        <article className="card">
+          <h3>Goal</h3>
+          <p className="value">{goal.toLocaleString()}</p>
+          <p className="hint">Used in goal scale mode</p>
+        </article>
+      </div>
+
+      <article className="panel">
+        <h3>Daily steps heatmap</h3>
+        <StepsCalendarHeatmap points={data.points} scaleMode={scaleMode} goal={goal} />
+      </article>
+    </section>
+  );
+}
+
+function MonthlyLifeDashboardPage() {
+  const [month, setMonth] = React.useState(() => getLocalIsoDay().slice(0, 7));
+  const { data, loading, error } = useFetch<MonthlyLifeResponse>(`/api/dashboard/monthly-life?month=${month}`);
+
+  if (loading) return <p>Loading monthly life dashboard...</p>;
+  if (error || !data) return <p>Could not load monthly life dashboard.</p>;
+
+  const deltaLabel = (value: number | undefined, suffix = "") => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return "No baseline";
+    }
+
+    const arrow = value > 0 ? "↑" : value < 0 ? "↓" : "→";
+    return `${arrow} ${value > 0 ? "+" : ""}${value.toFixed(1)}${suffix}`;
+  };
+
+  const cards: Array<{ title: string; value: string; delta: string; to: string }> = [
+    {
+      title: "Avg resting HR",
+      value: data.current.avgRestingHr == null ? "-" : `${data.current.avgRestingHr.toFixed(1)} bpm`,
+      delta: deltaLabel(data.deltas.avgRestingHr, " bpm"),
+      to: "/insights/resting-heart-rate"
+    },
+    {
+      title: "Avg total sleep",
+      value: data.current.avgSleepHours == null ? "-" : `${data.current.avgSleepHours.toFixed(2)} h`,
+      delta: deltaLabel(data.deltas.avgSleepHours, " h"),
+      to: "/insights/sleep-stages"
+    },
+    {
+      title: "Avg deep sleep %",
+      value: data.current.avgDeepSleepPct == null ? "-" : `${data.current.avgDeepSleepPct.toFixed(1)}%`,
+      delta: deltaLabel(data.deltas.avgDeepSleepPct, "%"),
+      to: "/insights/sleep-stages"
+    },
+    {
+      title: "Total steps",
+      value: data.current.totalSteps.toLocaleString(),
+      delta: deltaLabel(data.deltas.totalSteps),
+      to: "/insights/steps-heatmap"
+    },
+    {
+      title: "Total active minutes",
+      value: Math.round(data.current.totalActiveMinutes).toLocaleString(),
+      delta: deltaLabel(data.deltas.totalActiveMinutes),
+      to: "/insights/weekly-load"
+    },
+    {
+      title: "Longest single activity",
+      value: data.current.longestActivityLabel,
+      delta: deltaLabel(data.deltas.longestActivityScore),
+      to: "/insights/activity-next-sleep"
+    },
+    {
+      title: "Number of active days",
+      value: String(data.current.activeDays),
+      delta: deltaLabel(data.deltas.activeDays),
+      to: "/insights/weekly-load"
+    }
+  ];
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 8</p>
+          <h2>Monthly life dashboard</h2>
+          <p className="muted">One-glance monthly summary with deltas versus the previous month.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <section className="panel controls">
+        <label className="month-picker">
+          Month
+          <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+        </label>
+      </section>
+
+      <div className="grid cards-grid">
+        {cards.map((card) => (
+          <Link key={card.title} to={card.to} className="card card-link">
+            <h3>{card.title}</h3>
+            <p className="value small">{card.value}</p>
+            <p className="hint">{card.delta} vs previous month</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CorrelationExplorerPage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("90"));
+  const [metricA, setMetricA] = React.useState("activeMinutes");
+  const [metricB, setMetricB] = React.useState("deepSleepMinutes");
+  const [lag, setLag] = React.useState(1);
+
+  const query = React.useMemo(() => {
+    const params = new URLSearchParams(buildInsightQuery(range));
+    params.set("metricA", metricA);
+    params.set("metricB", metricB);
+    params.set("lag", String(lag));
+    return params.toString();
+  }, [range, metricA, metricB, lag]);
+
+  const { data, loading, error } = useFetch<CorrelationResponse>(`/api/dashboard/correlation?${query}`);
+
+  if (loading) return <p>Loading cross-metric correlation...</p>;
+  if (error || !data) return <p>Could not load correlation explorer.</p>;
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 6</p>
+          <h2>Cross-metric correlation explorer</h2>
+          <p className="muted">Compare two daily metrics and inspect lagged relationships with Pearson correlation.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <section className="panel controls">
+        <div className="filter-row">
+          <label>
+            Metric A
+            <select value={metricA} onChange={(event) => setMetricA(event.target.value)}>
+              {data.metricOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Metric B
+            <select value={metricB} onChange={(event) => setMetricB(event.target.value)}>
+              {data.metricOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Lag (days)
+            <input type="number" min={-7} max={7} step={1} value={lag} onChange={(event) => setLag(Math.max(-7, Math.min(7, Number(event.target.value) || 0)))} />
+          </label>
+        </div>
+      </section>
+
+      <div className="grid cards-grid">
+        <article className="card">
+          <h3>Pearson r</h3>
+          <p className="value">{typeof data.correlation === "number" ? data.correlation.toFixed(3) : "-"}</p>
+          <p className="hint">Correlation coefficient</p>
+        </article>
+        <article className="card">
+          <h3>Data pairs</h3>
+          <p className="value">{data.points.length}</p>
+          <p className="hint">Lag-aligned days</p>
+        </article>
+      </div>
+
+      <article className="panel">
+        <h3>Daily scatter</h3>
+        <CorrelationScatter points={data.points} metricA={metricA} metricB={metricB} />
+      </article>
+    </section>
+  );
+}
+
+function ActivityNextSleepPage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("90"));
+  const candidatesQuery = React.useMemo(() => buildInsightQuery(range), [range]);
+  const { data: candidatesData, loading: candidatesLoading, error: candidatesError } = useFetch<{ candidates: ActivityNextSleepCandidate[] }>(`/api/dashboard/activity-next-sleep/candidates?${candidatesQuery}`);
+  const [selectedId, setSelectedId] = React.useState<string>("");
+
+  React.useEffect(() => {
+    if (!selectedId && candidatesData?.candidates && candidatesData.candidates.length > 0) {
+      setSelectedId(candidatesData.candidates[0].id);
+    }
+  }, [candidatesData?.candidates, selectedId]);
+
+  const { data, loading, error } = useFetch<ActivityNextSleepResponse>(selectedId ? `/api/dashboard/activity-next-sleep/${selectedId}` : "");
+
+  if (candidatesLoading) return <p>Loading activity candidates...</p>;
+  if (candidatesError || !candidatesData) return <p>Could not load activity candidates.</p>;
+
+  const sleepPoint: SleepStagesPoint[] = data?.sleep
+    ? [{
+      day: data.sleep.day,
+      hasData: true,
+      deepHours: data.sleep.deepSleepHours,
+      lightHours: data.sleep.lightSleepHours,
+      remHours: data.sleep.remSleepHours,
+      awakeHours: data.sleep.awakeHours,
+      totalSleepHours: data.sleep.totalSleepHours,
+      rolling7SleepHours: data.comparison.averageSleepHours,
+      bedtimeMinute: undefined,
+      wakeMinute: undefined
+    }]
+    : [];
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 7</p>
+          <h2>Activity to next-night sleep detail</h2>
+          <p className="muted">Select an activity and inspect how the following night compares to your 30-day baseline.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <section className="panel controls">
+        <label>
+          Activity
+          <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+            {candidatesData.candidates.map((activity) => (
+              <option key={activity.id} value={activity.id}>
+                {new Date(activity.startTime).toLocaleDateString()} - {activity.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+
+      {loading ? <p>Loading selected activity detail...</p> : null}
+      {error || !data ? <p>Select an activity to view matched sleep data.</p> : (
+        <>
+          <article className="panel comparison-strip">
+            <p>
+              Night total: {data.sleep ? `${data.sleep.totalSleepHours.toFixed(2)} h` : "-"} ({data.comparison.sleepDelta == null ? "no baseline" : `${data.comparison.sleepDelta >= 0 ? "+" : ""}${data.comparison.sleepDelta.toFixed(2)} h vs 30d avg`})
+            </p>
+            <p>
+              Deep sleep: {data.sleep ? `${data.sleep.deepSleepHours.toFixed(2)} h` : "-"} ({data.comparison.deepDelta == null ? "no baseline" : `${data.comparison.deepDelta >= 0 ? "+" : ""}${data.comparison.deepDelta.toFixed(2)} h vs 30d avg`})
+            </p>
+          </article>
+
+          <div className="grid dashboard-grid">
+            <article className="panel">
+              <h3>Activity detail (HR + route)</h3>
+              <p className="muted">{formatDateTime(data.activity.startTime)} | {formatDurationMinutes(data.activity.durationMinutes)}</p>
+              <HeartRateLineChart samples={data.activity.heartRateSamples ?? []} />
+              {sourceAllowsRouteMap(data.activity.source) ? <RouteMap points={data.activity.routePoints ?? []} /> : null}
+            </article>
+
+            <article className="panel">
+              <h3>That night’s sleep stages</h3>
+              {sleepPoint.length === 0 ? <p className="empty">No sleep summary found for this calendar night.</p> : <SleepStagesStackedBars points={sleepPoint} />}
+            </article>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function WeeklyTrainingLoadPage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("365"));
+  const query = React.useMemo(() => buildInsightQuery(range), [range]);
+  const { data, loading, error } = useFetch<WeeklyTrainingLoadResponse>(`/api/dashboard/weekly-training-load?${query}`);
+
+  if (loading) return <p>Loading weekly training load...</p>;
+  if (error || !data) return <p>Could not load weekly training load.</p>;
+
+  const spikes = data.points.filter((point) => point.spikeWarning).length;
+  const detraining = data.points.filter((point) => point.detrainingWarning).length;
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 4</p>
+          <h2>Weekly training load summary</h2>
+          <p className="muted">Weekly stacked duration by activity type with trend and warning logic.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <div className="grid cards-grid">
+        <article className="card">
+          <h3>Weeks</h3>
+          <p className="value">{data.points.length}</p>
+          <p className="hint">In selected range</p>
+        </article>
+        <article className="card">
+          <h3>Spike warnings</h3>
+          <p className="value">{spikes}</p>
+          <p className="hint">&gt;50% over trailing avg</p>
+        </article>
+        <article className="card">
+          <h3>De-training warnings</h3>
+          <p className="value">{detraining}</p>
+          <p className="hint">&lt;25% for 2+ weeks</p>
+        </article>
+      </div>
+
+      <article className="panel">
+        <h3>Weekly stacked load + trend line</h3>
+        <WeeklyLoadChart points={data.points} />
+      </article>
+    </section>
+  );
+}
+
+function HrZoneDistributionPage() {
+  const [range, setRange] = React.useState<InsightDateRange>(() => createDateRangeFromPreset("90"));
+  const [period, setPeriod] = React.useState<"week" | "month">("week");
+  const [maxHr, setMaxHr] = React.useState(190);
+  const query = React.useMemo(() => {
+    const params = new URLSearchParams(buildInsightQuery(range));
+    params.set("period", period);
+    params.set("maxHr", String(maxHr));
+    return params.toString();
+  }, [range, period, maxHr]);
+  const { data, loading, error } = useFetch<HrZoneDistributionResponse>(`/api/dashboard/hr-zone-distribution?${query}`);
+
+  if (loading) return <p>Loading HR zone distribution...</p>;
+  if (error || !data) return <p>Could not load HR zone distribution.</p>;
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 5</p>
+          <h2>HR zone distribution</h2>
+          <p className="muted">Review aggregate time spent in zones to improve training awareness.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <DateRangeSelector value={range} onChange={setRange} />
+
+      <section className="panel controls">
+        <div className="chip-row">
+          <button type="button" className={`chip ${period === "week" ? "chip-active" : ""}`} onClick={() => setPeriod("week")}>Weekly</button>
+          <button type="button" className={`chip ${period === "month" ? "chip-active" : ""}`} onClick={() => setPeriod("month")}>Monthly</button>
+        </div>
+        <div className="goal-row">
+          <label>
+            Max HR for zone model
+            <input type="number" min={120} max={230} value={maxHr} onChange={(event) => setMaxHr(Math.max(120, Math.min(230, Number(event.target.value) || 190)))} />
+          </label>
+        </div>
+      </section>
+
+      <article className="panel">
+        <h3>Time in zones</h3>
+        <HrZoneStackedBars points={data.points} />
+      </article>
+    </section>
+  );
+}
+
+function StressBatteryPage() {
+  const [day, setDay] = React.useState(() => getLocalIsoDay());
+  const { data, loading, error } = useFetch<StressBodyBatteryResponse>(`/api/dashboard/stress-body-battery/${day}`);
+
+  if (loading) return <p>Loading stress and body battery timeline...</p>;
+  if (error || !data) return <p>Could not load stress and body battery data.</p>;
+
+  return (
+    <section className="stack-lg">
+      <header className="panel panel-header">
+        <div>
+          <p className="eyebrow">Insight screen 9 (optional)</p>
+          <h2>Body battery and stress over day</h2>
+          <p className="muted">This screen auto-detects whether stress/body battery series are populated by your Garmin sync.</p>
+        </div>
+        <Link className="button" to="/insights">Back to insights hub</Link>
+      </header>
+
+      <section className="panel controls">
+        <label className="month-picker">
+          Day
+          <input type="date" value={day} onChange={(event) => setDay(event.target.value)} />
+        </label>
+      </section>
+
+      <article className="panel">
+        <h3>Timeline</h3>
+        <StressBatteryTimeline data={data} />
       </article>
     </section>
   );
@@ -3722,6 +5238,16 @@ function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/activities" element={<ActivitiesHubPage />} />
           <Route path="/sleep" element={<SleepHubPage />} />
+          <Route path="/insights" element={<InsightsHubPage />} />
+          <Route path="/insights/resting-heart-rate" element={<RestingHeartRatePage />} />
+          <Route path="/insights/sleep-stages" element={<SleepStagesPage />} />
+          <Route path="/insights/steps-heatmap" element={<StepsHeatmapPage />} />
+          <Route path="/insights/monthly" element={<MonthlyLifeDashboardPage />} />
+          <Route path="/insights/correlation" element={<CorrelationExplorerPage />} />
+          <Route path="/insights/activity-next-sleep" element={<ActivityNextSleepPage />} />
+          <Route path="/insights/weekly-load" element={<WeeklyTrainingLoadPage />} />
+          <Route path="/insights/hr-zones" element={<HrZoneDistributionPage />} />
+          <Route path="/insights/stress-battery" element={<StressBatteryPage />} />
           <Route path="/activity/:id" element={<ActivityDetailPage />} />
           <Route path="/steps/:day" element={<StepsDetailPage />} />
           <Route path="/sleep/:day" element={<SleepDetailPage />} />

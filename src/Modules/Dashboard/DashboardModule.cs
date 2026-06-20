@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using System.Globalization;
 using System.Text.Json;
 
 namespace HealthHq.Modules.Dashboard;
@@ -109,6 +110,592 @@ public static class DashboardModule
                 sleep.AwakeHours,
                 sleep.SleepScore,
                 raw = TryParseRawJson(sleep.RawJson)
+            });
+        });
+
+        app.MapGet("/api/dashboard/resting-heart-rate", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveDateRange(request, defaultDays: 90);
+            var rollingWindow = 30;
+            var queryFromDay = range.FromDay.AddDays(-(rollingWindow - 1));
+            var (queryFrom, queryTo) = ToUtcDayRange(queryFromDay, range.ToDay);
+            var steps = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, queryFrom, queryTo, cancellationToken);
+
+            var restingByDay = steps
+                .GroupBy(x => x.Day)
+                .ToDictionary(group => group.Key, group =>
+                {
+                    foreach (var item in group)
+                    {
+                        if (TryExtractRestingHeartRate(item.RawJson, out var restingHeartRate))
+                        {
+                            return (double?)restingHeartRate;
+                        }
+                    }
+
+                    return (double?)null;
+                });
+
+            var allDays = EnumerateDays(queryFromDay, range.ToDay).ToArray();
+            var allValues = allDays
+                .Select(day => restingByDay.TryGetValue(day, out var value) ? value : null)
+                .ToArray();
+
+            var rolling7 = ComputeRollingAverage(allValues, 7);
+            var rolling30 = ComputeRollingAverage(allValues, 30);
+            var rolling30StdDev = ComputeRollingStandardDeviation(allValues, 30);
+
+            var points = allDays
+                .Select((day, index) => new { day, index })
+                .Where(x => x.day >= range.FromDay)
+                .Select(x =>
+                {
+                    var resting = allValues[x.index];
+                    var baseline = rolling30[x.index];
+                    var stdDev = rolling30StdDev[x.index];
+                    var isAnomaly = resting.HasValue
+                        && baseline.HasValue
+                        && stdDev.HasValue
+                        && resting.Value > baseline.Value + stdDev.Value;
+
+                    return new
+                    {
+                        day = x.day,
+                        restingHr = resting,
+                        rolling7 = rolling7[x.index],
+                        rolling30 = baseline,
+                        baseline30 = baseline,
+                        stdDev30 = stdDev,
+                        isAnomaly
+                    };
+                })
+                .ToArray();
+
+            return Results.Ok(new
+            {
+                fromDay = range.FromDay,
+                toDay = range.ToDay,
+                points,
+                availableDays = points.Count(x => x.restingHr is not null)
+            });
+        });
+
+        app.MapGet("/api/dashboard/sleep-stages", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveDateRange(request, defaultDays: 90);
+            var queryFromDay = range.FromDay.AddDays(-6);
+            var (queryFrom, queryTo) = ToUtcDayRange(queryFromDay, range.ToDay);
+            var sleepRecords = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, queryFrom, queryTo, cancellationToken);
+
+            var byDay = sleepRecords
+                .GroupBy(x => x.Day)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.SleepHours).First());
+
+            var allDays = EnumerateDays(queryFromDay, range.ToDay).ToArray();
+            var totalSleepValues = allDays
+                .Select(day => byDay.TryGetValue(day, out var record) ? (double?)record.SleepHours : null)
+                .ToArray();
+            var rolling7 = ComputeRollingAverage(totalSleepValues, 7);
+
+            var points = allDays
+                .Select((day, index) => new { day, index })
+                .Where(x => x.day >= range.FromDay)
+                .Select(x =>
+                {
+                    if (!byDay.TryGetValue(x.day, out var record))
+                    {
+                        return new
+                        {
+                            day = x.day,
+                            hasData = false,
+                            deepHours = 0d,
+                            lightHours = 0d,
+                            remHours = 0d,
+                            awakeHours = 0d,
+                            totalSleepHours = 0d,
+                            rolling7SleepHours = rolling7[x.index],
+                            bedtimeMinute = (int?)null,
+                            wakeMinute = (int?)null
+                        };
+                    }
+
+                    var (bedtime, wakeTime) = ExtractSleepSchedule(record.RawJson);
+                    return new
+                    {
+                        day = x.day,
+                        hasData = true,
+                        deepHours = record.DeepSleepHours,
+                        lightHours = record.LightSleepHours,
+                        remHours = record.RemSleepHours,
+                        awakeHours = record.AwakeHours,
+                        totalSleepHours = record.SleepHours,
+                        rolling7SleepHours = rolling7[x.index],
+                        bedtimeMinute = bedtime is null ? (int?)null : (int)Math.Round(bedtime.Value.TimeOfDay.TotalMinutes),
+                        wakeMinute = wakeTime is null ? (int?)null : (int)Math.Round(wakeTime.Value.TimeOfDay.TotalMinutes)
+                    };
+                })
+                .ToArray();
+
+            return Results.Ok(new
+            {
+                fromDay = range.FromDay,
+                toDay = range.ToDay,
+                points,
+                availableDays = points.Count(x => x.hasData)
+            });
+        });
+
+        app.MapGet("/api/dashboard/steps-heatmap", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveDateRange(request, defaultDays: 365);
+            var (fromInclusive, toInclusive) = ToUtcDayRange(range.FromDay, range.ToDay);
+            var stepRecords = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, fromInclusive, toInclusive, cancellationToken);
+
+            var byDay = stepRecords
+                .GroupBy(x => x.Day)
+                .ToDictionary(group => group.Key, group => group.Max(x => x.TotalSteps));
+
+            var points = EnumerateDays(range.FromDay, range.ToDay)
+                .Select(day =>
+                {
+                    var hasData = byDay.TryGetValue(day, out var steps);
+                    return new
+                    {
+                        day,
+                        steps = hasData ? steps : 0,
+                        hasData
+                    };
+                })
+                .ToArray();
+
+            var nonZero = points.Where(x => x.hasData).Select(x => x.steps).ToArray();
+
+            return Results.Ok(new
+            {
+                fromDay = range.FromDay,
+                toDay = range.ToDay,
+                points,
+                minSteps = nonZero.Length == 0 ? 0 : nonZero.Min(),
+                maxSteps = nonZero.Length == 0 ? 0 : nonZero.Max(),
+                defaultGoal = 10000
+            });
+        });
+
+        app.MapGet("/api/dashboard/monthly-life", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var month = ResolveTargetMonth(request);
+            var monthStart = new DateOnly(month.Year, month.Month, 1);
+            var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+            var previousStart = monthStart.AddMonths(-1);
+            var previousEnd = monthStart.AddDays(-1);
+            var queryStart = previousStart;
+            var queryEnd = monthEnd;
+
+            var (fromInclusive, toInclusive) = ToUtcDayRange(queryStart, queryEnd);
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+            var steps = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, fromInclusive, toInclusive, cancellationToken);
+            var sleep = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, fromInclusive, toInclusive, cancellationToken);
+
+            var current = BuildMonthlyLifeSnapshot(monthStart, monthEnd, activities, steps, sleep);
+            var previous = BuildMonthlyLifeSnapshot(previousStart, previousEnd, activities, steps, sleep);
+
+            return Results.Ok(new
+            {
+                month = monthStart.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                current,
+                previous,
+                deltas = new
+                {
+                    avgRestingHr = ComputeDelta(current.AvgRestingHr, previous.AvgRestingHr),
+                    avgSleepHours = ComputeDelta(current.AvgSleepHours, previous.AvgSleepHours),
+                    avgDeepSleepPct = ComputeDelta(current.AvgDeepSleepPct, previous.AvgDeepSleepPct),
+                    totalSteps = ComputeDelta(current.TotalSteps, previous.TotalSteps),
+                    totalActiveMinutes = ComputeDelta(current.TotalActiveMinutes, previous.TotalActiveMinutes),
+                    longestActivityScore = ComputeDelta(current.LongestActivityScore, previous.LongestActivityScore),
+                    activeDays = ComputeDelta(current.ActiveDays, previous.ActiveDays)
+                }
+            });
+        });
+
+        app.MapGet("/api/dashboard/correlation", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveDateRange(request, defaultDays: 90);
+            var metricA = request.Query["metricA"].FirstOrDefault() ?? "activeMinutes";
+            var metricB = request.Query["metricB"].FirstOrDefault() ?? "deepSleepMinutes";
+            var lag = ParseIntQuery(request, "lag", 1, -7, 7);
+
+            var queryFrom = range.FromDay.AddDays(Math.Min(0, lag));
+            var queryTo = range.ToDay.AddDays(Math.Max(0, lag));
+            var (fromInclusive, toInclusive) = ToUtcDayRange(queryFrom, queryTo);
+
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+            var steps = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, fromInclusive, toInclusive, cancellationToken);
+            var sleep = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, fromInclusive, toInclusive, cancellationToken);
+
+            var activityByDay = activities.GroupBy(x => DateOnly.FromDateTime(x.StartTime.UtcDateTime)).ToDictionary(x => x.Key, x => x.ToArray());
+            var stepsByDay = steps.GroupBy(x => x.Day).ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.TotalSteps).First());
+            var sleepByDay = sleep.GroupBy(x => x.Day).ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.SleepHours).First());
+
+            var snapshots = EnumerateDays(queryFrom, queryTo)
+                .ToDictionary(
+                    day => day,
+                    day => BuildDailyMetricSnapshot(
+                        day,
+                        activityByDay.TryGetValue(day, out var activitiesOnDay) ? activitiesOnDay : [],
+                        stepsByDay.TryGetValue(day, out var stepsOnDay) ? stepsOnDay : null,
+                        sleepByDay.TryGetValue(day, out var sleepOnDay) ? sleepOnDay : null));
+
+            var points = new List<CorrelationPoint>();
+            foreach (var day in EnumerateDays(range.FromDay, range.ToDay))
+            {
+                var compareDay = day.AddDays(lag);
+                if (!snapshots.TryGetValue(day, out var first) || !snapshots.TryGetValue(compareDay, out var second))
+                {
+                    continue;
+                }
+
+                if (!TryGetDailyMetricValue(first, metricA, out var xValue)
+                    || !TryGetDailyMetricValue(second, metricB, out var yValue))
+                {
+                    continue;
+                }
+
+                points.Add(new CorrelationPoint(
+                    Day: day,
+                    CompareDay: compareDay,
+                    X: Math.Round(xValue, 3),
+                    Y: Math.Round(yValue, 3)));
+            }
+
+            var coefficient = ComputePearsonCorrelation(points.Select(x => x.X), points.Select(x => x.Y));
+
+            return Results.Ok(new
+            {
+                fromDay = range.FromDay,
+                toDay = range.ToDay,
+                metricA,
+                metricB,
+                lag,
+                points,
+                correlation = coefficient,
+                metricOptions = DailyMetricOptions
+            });
+        });
+
+        app.MapGet("/api/dashboard/activity-next-sleep/candidates", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveDateRange(request, defaultDays: 90);
+            var (fromInclusive, toInclusive) = ToUtcDayRange(range.FromDay, range.ToDay);
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+
+            var candidates = activities
+                .OrderByDescending(x => x.StartTime)
+                .Take(180)
+                .Select(x => new
+                {
+                    x.Id,
+                    x.StartTime,
+                    name = string.IsNullOrWhiteSpace(x.Name) ? NormalizeActivityType(x.Type) : x.Name,
+                    type = NormalizeActivityType(x.Type),
+                    durationMinutes = Math.Round(GetEffectiveDurationMinutes(x), 1),
+                    x.DistanceKm
+                })
+                .ToArray();
+
+            return Results.Ok(new { candidates });
+        });
+
+        app.MapGet("/api/dashboard/activity-next-sleep/{activityId}", async (string activityId, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var activity = await store.GetByIdAsync<ActivityRecord>(DocumentTypes.Activity, activityId, cancellationToken);
+            if (activity is null)
+            {
+                return Results.NotFound(new { message = "Activity not found." });
+            }
+
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            if (!stravaEnabled && IsStravaSource(activity.Source))
+            {
+                return Results.NotFound(new { message = "Activity not found." });
+            }
+
+            var nightDay = DateOnly.FromDateTime(activity.StartTime.UtcDateTime);
+            var (nightFrom, nightTo) = ToUtcDayRange(nightDay);
+            var nightSleepRecords = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, nightFrom, nightTo, cancellationToken);
+            var nightSleep = nightSleepRecords.OrderByDescending(x => x.SleepHours).FirstOrDefault();
+
+            var thirtyDayStart = nightDay.AddDays(-29);
+            var (avgFrom, avgTo) = ToUtcDayRange(thirtyDayStart, nightDay);
+            var averageRangeSleep = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, avgFrom, avgTo, cancellationToken);
+            var averageSleepHours = averageRangeSleep.Count == 0 ? (double?)null : Math.Round(averageRangeSleep.Average(x => x.SleepHours), 2);
+            var averageDeepHours = averageRangeSleep.Count == 0 ? (double?)null : Math.Round(averageRangeSleep.Average(x => x.DeepSleepHours), 2);
+
+            var rawPayload = TryParseRawJson(activity.RawJson);
+
+            return Results.Ok(new
+            {
+                activity = new
+                {
+                    activity.Id,
+                    activity.Source,
+                    name = string.IsNullOrWhiteSpace(activity.Name) ? NormalizeActivityType(activity.Type) : activity.Name,
+                    type = NormalizeActivityType(activity.Type),
+                    activity.StartTime,
+                    endTime = GetEffectiveEndTime(activity),
+                    durationMinutes = Math.Round(GetEffectiveDurationMinutes(activity), 2),
+                    activity.DistanceKm,
+                    activity.Steps,
+                    activity.AverageHeartRate,
+                    activity.MaxHeartRate,
+                    loadScore = Math.Round(activity.LoadScore ?? GetEffectiveDurationMinutes(activity), 2),
+                    routePoints = activity.RoutePoints ?? ExtractRoutePoints(rawPayload),
+                    heartRateSamples = activity.HeartRateSamples ?? ExtractHeartRateSamples(rawPayload)
+                },
+                nightDay,
+                sleep = nightSleep is null
+                    ? null
+                    : new
+                    {
+                        nightSleep.Day,
+                        totalSleepHours = nightSleep.SleepHours,
+                        deepSleepHours = nightSleep.DeepSleepHours,
+                        lightSleepHours = nightSleep.LightSleepHours,
+                        remSleepHours = nightSleep.RemSleepHours,
+                        awakeHours = nightSleep.AwakeHours,
+                        schedule = ExtractSleepSchedule(nightSleep.RawJson)
+                    },
+                comparison = new
+                {
+                    averageSleepHours,
+                    averageDeepHours,
+                    sleepDelta = nightSleep is null || !averageSleepHours.HasValue ? (double?)null : Math.Round(nightSleep.SleepHours - averageSleepHours.Value, 2),
+                    deepDelta = nightSleep is null || !averageDeepHours.HasValue ? (double?)null : Math.Round(nightSleep.DeepSleepHours - averageDeepHours.Value, 2)
+                }
+            });
+        });
+
+        app.MapGet("/api/dashboard/weekly-training-load", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var range = ResolveDateRange(request, defaultDays: 365);
+            var firstWeekStart = GetIsoWeekStart(range.FromDay);
+            var queryFrom = firstWeekStart.AddDays(-28);
+            var queryTo = range.ToDay;
+            var (fromInclusive, toInclusive) = ToUtcDayRange(queryFrom, queryTo);
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+            var steps = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, fromInclusive, toInclusive, cancellationToken);
+            var restingByDay = steps
+                .GroupBy(x => x.Day)
+                .ToDictionary(group => group.Key, group =>
+                {
+                    foreach (var item in group)
+                    {
+                        if (TryExtractRestingHeartRate(item.RawJson, out var restingHr))
+                        {
+                            return restingHr;
+                        }
+                    }
+
+                    return (int?)null;
+                });
+
+            var weekly = activities
+                .Select(activity =>
+                {
+                    var day = DateOnly.FromDateTime(activity.StartTime.UtcDateTime);
+                    var weekStart = GetIsoWeekStart(day);
+                    var duration = GetEffectiveDurationMinutes(activity);
+                    var load = ComputeSimpleLoadMetric(duration, activity.AverageHeartRate, restingByDay.TryGetValue(day, out var rhr) ? rhr : null);
+                    return new
+                    {
+                        weekStart,
+                        weekKey = GetIsoWeekKey(day),
+                        type = NormalizeActivityType(activity.Type),
+                        duration,
+                        distanceKm = activity.DistanceKm ?? 0,
+                        calories = 0d,
+                        load
+                    };
+                })
+                .GroupBy(x => x.weekStart)
+                .OrderBy(group => group.Key)
+                .Select(group =>
+                {
+                    var byType = group
+                        .GroupBy(x => x.type)
+                        .Select(typeGroup => new WeeklyActivityTypeLoad(
+                            Type: typeGroup.Key,
+                            DurationMinutes: Math.Round(typeGroup.Sum(x => x.duration), 1),
+                            DistanceKm: Math.Round(typeGroup.Sum(x => x.distanceKm), 2),
+                            Calories: Math.Round(typeGroup.Sum(x => x.calories), 1),
+                            Load: Math.Round(typeGroup.Sum(x => x.load), 1)))
+                        .OrderByDescending(x => x.DurationMinutes)
+                        .ToArray();
+
+                    return new WeeklyLoadPoint(
+                        WeekStart: group.Key,
+                        WeekKey: GetIsoWeekKey(group.Key),
+                        TotalDurationMinutes: Math.Round(group.Sum(x => x.duration), 1),
+                        TotalDistanceKm: Math.Round(group.Sum(x => x.distanceKm), 2),
+                        TotalCalories: Math.Round(group.Sum(x => x.calories), 1),
+                        TotalLoad: Math.Round(group.Sum(x => x.load), 1),
+                        ByType: byType,
+                        TrailingAverageDuration: null,
+                        SpikeWarning: false,
+                        DetrainingWarning: false);
+                })
+                .Where(x => x.WeekStart >= firstWeekStart)
+                .ToList();
+
+            var enriched = ApplyWeeklyWarningFlags(weekly);
+
+            return Results.Ok(new
+            {
+                fromDay = range.FromDay,
+                toDay = range.ToDay,
+                points = enriched
+            });
+        });
+
+        app.MapGet("/api/dashboard/hr-zone-distribution", async (HttpRequest request, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            var period = request.Query["period"].FirstOrDefault()?.ToLowerInvariant() == "month" ? "month" : "week";
+            var maxHr = ParseIntQuery(request, "maxHr", 190, 120, 230);
+            var range = ResolveDateRange(request, defaultDays: 90);
+            var (fromInclusive, toInclusive) = ToUtcDayRange(range.FromDay, range.ToDay);
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled);
+
+            var grouped = activities
+                .Select(activity =>
+                {
+                    var day = DateOnly.FromDateTime(activity.StartTime.UtcDateTime);
+                    var keyDay = period == "month"
+                        ? new DateOnly(day.Year, day.Month, 1)
+                        : GetIsoWeekStart(day);
+                    var samples = activity.HeartRateSamples ?? ExtractHeartRateSamples(TryParseRawJson(activity.RawJson));
+                    var zones = ComputeHrZoneSeconds(samples, GetEffectiveDurationMinutes(activity), activity.AverageHeartRate, maxHr);
+                    return new { keyDay, zones };
+                })
+                .GroupBy(x => x.keyDay)
+                .OrderBy(x => x.Key)
+                .Select(group => new
+                {
+                    periodStart = group.Key,
+                    label = period == "month" ? group.Key.ToString("yyyy-MM", CultureInfo.InvariantCulture) : GetIsoWeekKey(group.Key),
+                    zone1Minutes = Math.Round(group.Sum(x => x.zones.Zone1Seconds) / 60d, 1),
+                    zone2Minutes = Math.Round(group.Sum(x => x.zones.Zone2Seconds) / 60d, 1),
+                    zone3Minutes = Math.Round(group.Sum(x => x.zones.Zone3Seconds) / 60d, 1),
+                    zone4Minutes = Math.Round(group.Sum(x => x.zones.Zone4Seconds) / 60d, 1),
+                    zone5Minutes = Math.Round(group.Sum(x => x.zones.Zone5Seconds) / 60d, 1),
+                    totalMinutes = Math.Round(group.Sum(x => x.zones.TotalSeconds) / 60d, 1)
+                })
+                .ToArray();
+
+            return Results.Ok(new
+            {
+                period,
+                maxHr,
+                fromDay = range.FromDay,
+                toDay = range.ToDay,
+                points = grouped
+            });
+        });
+
+        app.MapGet("/api/dashboard/stress-body-battery/{day}", async (string day, IDocumentStore store, CancellationToken cancellationToken) =>
+        {
+            if (!DateOnly.TryParse(day, out var parsedDay))
+            {
+                return Results.BadRequest(new { message = "Invalid day. Use yyyy-MM-dd." });
+            }
+
+            var (fromInclusive, toInclusive) = ToUtcDayRange(parsedDay);
+            var stepRecords = await store.ListByRecordedAtAsync<DailyStepsRecord>(DocumentTypes.DailySteps, fromInclusive, toInclusive, cancellationToken);
+            var selected = stepRecords.OrderByDescending(x => x.TotalSteps).FirstOrDefault();
+
+            if (selected is null)
+            {
+                return Results.Ok(new
+                {
+                    day = parsedDay,
+                    available = false,
+                    message = "No monitoring summary found for this day.",
+                    stressPoints = Array.Empty<object>(),
+                    bodyBatteryPoints = Array.Empty<object>(),
+                    activityBlocks = Array.Empty<object>(),
+                    sleepWindow = (object?)null
+                });
+            }
+
+            var stressPoints = ExtractNamedSeries(selected.RawJson, new[] { "stress", "stressLevel", "stress_level" })
+                .Select(x => new { minute = x.Minute, value = x.Value })
+                .ToArray();
+            var bodyBatteryPoints = ExtractNamedSeries(selected.RawJson, new[] { "bodyBattery", "body_battery", "bodyBatteryLevel" })
+                .Select(x => new { minute = x.Minute, value = x.Value })
+                .ToArray();
+
+            var stravaEnabled = await IsStravaEnabledAsync(store, cancellationToken);
+            var activities = FilterVisibleActivities(
+                await store.ListByRecordedAtAsync<ActivityRecord>(DocumentTypes.Activity, fromInclusive, toInclusive, cancellationToken),
+                stravaEnabled)
+                .Where(x => DateOnly.FromDateTime(x.StartTime.UtcDateTime) == parsedDay)
+                .Select(x =>
+                {
+                    var startMinute = x.StartTime.UtcDateTime.Hour * 60 + x.StartTime.UtcDateTime.Minute;
+                    var end = GetEffectiveEndTime(x).UtcDateTime;
+                    var endMinute = end.Hour * 60 + end.Minute;
+                    if (endMinute < startMinute)
+                    {
+                        endMinute = startMinute;
+                    }
+
+                    return new
+                    {
+                        x.Id,
+                        name = string.IsNullOrWhiteSpace(x.Name) ? NormalizeActivityType(x.Type) : x.Name,
+                        startMinute,
+                        endMinute
+                    };
+                })
+                .ToArray();
+
+            var sleepRecords = await store.ListByRecordedAtAsync<SleepSummaryRecord>(DocumentTypes.SleepSummary, fromInclusive, toInclusive, cancellationToken);
+            var sleepRecord = sleepRecords.OrderByDescending(x => x.SleepHours).FirstOrDefault();
+            var schedule = sleepRecord is null
+                ? (Bedtime: (DateTimeOffset?)null, WakeTime: (DateTimeOffset?)null)
+                : ExtractSleepSchedule(sleepRecord.RawJson);
+
+            return Results.Ok(new
+            {
+                day = parsedDay,
+                available = stressPoints.Length > 0 || bodyBatteryPoints.Length > 0,
+                message = stressPoints.Length == 0 && bodyBatteryPoints.Length == 0
+                    ? "No stress/body battery series were found in monitoring data for this day."
+                    : "Series detected.",
+                stressPoints,
+                bodyBatteryPoints,
+                activityBlocks = activities,
+                sleepWindow = schedule.Bedtime.HasValue && schedule.WakeTime.HasValue
+                    ? new
+                    {
+                        startMinute = schedule.Bedtime.Value.UtcDateTime.Hour * 60 + schedule.Bedtime.Value.UtcDateTime.Minute,
+                        endMinute = schedule.WakeTime.Value.UtcDateTime.Hour * 60 + schedule.WakeTime.Value.UtcDateTime.Minute
+                    }
+                    : null
             });
         });
 
@@ -657,4 +1244,773 @@ public static class DashboardModule
         var to = from.AddDays(1).AddTicks(-1);
         return (from, to);
     }
+
+    private static (DateTimeOffset FromInclusive, DateTimeOffset ToInclusive) ToUtcDayRange(DateOnly fromDay, DateOnly toDay)
+    {
+        var from = new DateTimeOffset(fromDay.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var to = new DateTimeOffset(toDay.ToDateTime(TimeOnly.MaxValue), TimeSpan.Zero);
+        return (from, to);
+    }
+
+    private static DateRange ResolveDateRange(HttpRequest request, int defaultDays)
+    {
+        var toDay = DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        var fromRaw = request.Query["from"].FirstOrDefault();
+        var toRaw = request.Query["to"].FirstOrDefault();
+
+        if (DateOnly.TryParse(fromRaw, out var parsedFrom) && DateOnly.TryParse(toRaw, out var parsedTo))
+        {
+            if (parsedTo < parsedFrom)
+            {
+                (parsedFrom, parsedTo) = (parsedTo, parsedFrom);
+            }
+
+            var clampedFrom = parsedFrom < toDay.AddDays(-730) ? toDay.AddDays(-730) : parsedFrom;
+            var clampedTo = parsedTo > toDay ? toDay : parsedTo;
+            if (clampedTo < clampedFrom)
+            {
+                clampedFrom = clampedTo;
+            }
+
+            return new DateRange(clampedFrom, clampedTo);
+        }
+
+        var rangeRaw = request.Query["range"].FirstOrDefault();
+        var days = rangeRaw switch
+        {
+            "30" => 30,
+            "90" => 90,
+            "365" => 365,
+            _ => defaultDays
+        };
+
+        return new DateRange(toDay.AddDays(-(days - 1)), toDay);
+    }
+
+    private static IEnumerable<DateOnly> EnumerateDays(DateOnly fromInclusive, DateOnly toInclusive)
+    {
+        for (var day = fromInclusive; day <= toInclusive; day = day.AddDays(1))
+        {
+            yield return day;
+        }
+    }
+
+    private static int ParseIntQuery(HttpRequest request, string key, int defaultValue, int min, int max)
+    {
+        var raw = request.Query[key].FirstOrDefault();
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return defaultValue;
+        }
+
+        return Math.Min(max, Math.Max(min, parsed));
+    }
+
+    private static DailyMetricSnapshot BuildDailyMetricSnapshot(
+        DateOnly day,
+        IReadOnlyList<ActivityRecord> activities,
+        DailyStepsRecord? steps,
+        SleepSummaryRecord? sleep)
+    {
+        var activeMinutes = activities.Sum(GetEffectiveDurationMinutes);
+        var activeCalories = steps?.ActiveKilocalories;
+        var restingHr = steps is null || !TryExtractRestingHeartRate(steps.RawJson, out var rhr) ? (double?)null : rhr;
+        var stepsValue = steps?.TotalSteps;
+
+        var sleepHours = sleep?.SleepHours;
+        var deepSleepMinutes = sleep is null ? (double?)null : sleep.DeepSleepHours * 60d;
+        var sleepEfficiency = sleep is null
+            ? (double?)null
+            : sleep.SleepHours + sleep.AwakeHours <= 0
+                ? (double?)null
+                : (sleep.SleepHours / (sleep.SleepHours + sleep.AwakeHours)) * 100d;
+
+        return new DailyMetricSnapshot(
+            Day: day,
+            ActiveMinutes: Math.Round(activeMinutes, 2),
+            ActiveCalories: activeCalories,
+            Steps: stepsValue,
+            SleepHours: sleepHours,
+            SleepEfficiency: sleepEfficiency,
+            RestingHr: restingHr,
+            DeepSleepMinutes: deepSleepMinutes);
+    }
+
+    private static bool TryGetDailyMetricValue(DailyMetricSnapshot snapshot, string metricKey, out double value)
+    {
+        value = default;
+        var normalized = metricKey.Trim().ToLowerInvariant();
+
+        double? selected = normalized switch
+        {
+            "activeminutes" => snapshot.ActiveMinutes,
+            "activecalories" => snapshot.ActiveCalories,
+            "steps" => snapshot.Steps,
+            "sleephours" => snapshot.SleepHours,
+            "sleepefficiency" => snapshot.SleepEfficiency,
+            "restinghr" => snapshot.RestingHr,
+            "deepsleepminutes" => snapshot.DeepSleepMinutes,
+            _ => null
+        };
+
+        if (!selected.HasValue || !double.IsFinite(selected.Value))
+        {
+            return false;
+        }
+
+        value = selected.Value;
+        return true;
+    }
+
+    private static double? ComputePearsonCorrelation(IEnumerable<double> xValues, IEnumerable<double> yValues)
+    {
+        var x = xValues.ToArray();
+        var y = yValues.ToArray();
+        if (x.Length < 2 || y.Length < 2 || x.Length != y.Length)
+        {
+            return null;
+        }
+
+        var xMean = x.Average();
+        var yMean = y.Average();
+        var numerator = 0d;
+        var xVariance = 0d;
+        var yVariance = 0d;
+        for (var index = 0; index < x.Length; index++)
+        {
+            var xDelta = x[index] - xMean;
+            var yDelta = y[index] - yMean;
+            numerator += xDelta * yDelta;
+            xVariance += xDelta * xDelta;
+            yVariance += yDelta * yDelta;
+        }
+
+        if (xVariance <= 0 || yVariance <= 0)
+        {
+            return null;
+        }
+
+        return Math.Round(numerator / Math.Sqrt(xVariance * yVariance), 4);
+    }
+
+    private static DateOnly GetIsoWeekStart(DateOnly day)
+    {
+        var dayOfWeek = (int)day.DayOfWeek;
+        var offset = dayOfWeek == 0 ? -6 : 1 - dayOfWeek;
+        return day.AddDays(offset);
+    }
+
+    private static string GetIsoWeekKey(DateOnly day)
+    {
+        var week = ISOWeek.GetWeekOfYear(day.ToDateTime(TimeOnly.MinValue));
+        var year = ISOWeek.GetYear(day.ToDateTime(TimeOnly.MinValue));
+        return $"{year}-W{week:D2}";
+    }
+
+    private static double ComputeSimpleLoadMetric(double durationMinutes, int? averageHeartRate, int? restingHeartRate)
+    {
+        if (!averageHeartRate.HasValue || !restingHeartRate.HasValue || restingHeartRate <= 0)
+        {
+            return durationMinutes;
+        }
+
+        var ratio = Math.Max(0.5, Math.Min(3.5, averageHeartRate.Value / (double)restingHeartRate.Value));
+        return durationMinutes * ratio;
+    }
+
+    private static IReadOnlyList<WeeklyLoadPoint> ApplyWeeklyWarningFlags(IReadOnlyList<WeeklyLoadPoint> points)
+    {
+        var updated = points.ToList();
+        var lowStreak = 0;
+        for (var index = 0; index < updated.Count; index++)
+        {
+            var trailing = updated
+                .Skip(Math.Max(0, index - 4))
+                .Take(index - Math.Max(0, index - 4))
+                .Select(x => x.TotalDurationMinutes)
+                .ToArray();
+
+            var trailingAverage = trailing.Length == 0 ? (double?)null : trailing.Average();
+            var spike = trailingAverage.HasValue && trailingAverage.Value > 0 && updated[index].TotalDurationMinutes > trailingAverage.Value * 1.5;
+            var low = trailingAverage.HasValue && trailingAverage.Value > 0 && updated[index].TotalDurationMinutes < trailingAverage.Value * 0.25;
+            lowStreak = low ? lowStreak + 1 : 0;
+
+            updated[index] = updated[index] with
+            {
+                TrailingAverageDuration = trailingAverage.HasValue ? Math.Round(trailingAverage.Value, 2) : null,
+                SpikeWarning = spike,
+                DetrainingWarning = lowStreak >= 2
+            };
+        }
+
+        return updated;
+    }
+
+    private static HrZoneSeconds ComputeHrZoneSeconds(
+        IReadOnlyList<ActivityHeartRateSample>? samples,
+        double durationMinutes,
+        int? averageHeartRate,
+        int maxHeartRate)
+    {
+        var zoneSeconds = new double[5];
+        if (samples is { Count: > 1 })
+        {
+            var ordered = samples.OrderBy(x => x.OffsetSeconds).ToArray();
+            for (var index = 0; index < ordered.Length; index++)
+            {
+                var current = ordered[index];
+                var nextOffset = index < ordered.Length - 1 ? ordered[index + 1].OffsetSeconds : current.OffsetSeconds + 1;
+                var durationSeconds = Math.Max(1, nextOffset - current.OffsetSeconds);
+                zoneSeconds[ResolveHrZone(current.HeartRate, maxHeartRate)] += durationSeconds;
+            }
+        }
+        else if (averageHeartRate.HasValue)
+        {
+            zoneSeconds[ResolveHrZone(averageHeartRate.Value, maxHeartRate)] += Math.Max(0, durationMinutes * 60d);
+        }
+
+        return new HrZoneSeconds(zoneSeconds[0], zoneSeconds[1], zoneSeconds[2], zoneSeconds[3], zoneSeconds[4]);
+    }
+
+    private static int ResolveHrZone(int heartRate, int maxHeartRate)
+    {
+        var ratio = heartRate / (double)Math.Max(maxHeartRate, 1);
+        if (ratio < 0.6) return 0;
+        if (ratio < 0.7) return 1;
+        if (ratio < 0.8) return 2;
+        if (ratio < 0.9) return 3;
+        return 4;
+    }
+
+    private static List<MinuteValuePoint> ExtractNamedSeries(string rawJson, string[] keys)
+    {
+        var result = new List<MinuteValuePoint>();
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return result;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var seenMinutes = new HashSet<int>();
+            CollectNamedSeriesPoints(document.RootElement, keys, result, seenMinutes);
+            return result.OrderBy(x => x.Minute).ToList();
+        }
+        catch
+        {
+            return result;
+        }
+    }
+
+    private static void CollectNamedSeriesPoints(JsonElement node, string[] keys, List<MinuteValuePoint> points, HashSet<int> seenMinutes)
+    {
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in node.EnumerateObject())
+            {
+                if (keys.Any(key => string.Equals(key, property.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    foreach (var point in ConvertNodeToSeriesPoints(property.Value))
+                    {
+                        if (seenMinutes.Add(point.Minute))
+                        {
+                            points.Add(point with { Value = Math.Round(point.Value, 2) });
+                        }
+                    }
+                }
+
+                CollectNamedSeriesPoints(property.Value, keys, points, seenMinutes);
+            }
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in node.EnumerateArray())
+            {
+                CollectNamedSeriesPoints(item, keys, points, seenMinutes);
+            }
+        }
+    }
+
+    private static List<MinuteValuePoint> ConvertNodeToSeriesPoints(JsonElement node)
+    {
+        var points = new List<MinuteValuePoint>();
+        if (node.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var item in node.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out var scalarValue))
+                {
+                    points.Add(new MinuteValuePoint(index, scalarValue));
+                    index++;
+                    continue;
+                }
+
+                if (item.ValueKind == JsonValueKind.Object)
+                {
+                    if (TryGetPropertyIgnoreCase(item, "value", out var valueNode)
+                        && valueNode.ValueKind == JsonValueKind.Number
+                        && valueNode.TryGetDouble(out var value))
+                    {
+                        var minute = index;
+                        if (TryGetPropertyIgnoreCase(item, "minute", out var minuteNode)
+                            && TryReadInt(minuteNode, out var parsedMinute))
+                        {
+                            minute = parsedMinute;
+                        }
+                        else if (TryGetPropertyIgnoreCase(item, "timestamp", out var timestampNode)
+                                 && ParseTimestampValue(timestampNode) is { } timestamp)
+                        {
+                            minute = timestamp.UtcDateTime.Hour * 60 + timestamp.UtcDateTime.Minute;
+                        }
+
+                        points.Add(new MinuteValuePoint(Math.Max(0, Math.Min(1439, minute)), value));
+                        index++;
+                    }
+                }
+            }
+
+            return points;
+        }
+
+        if (node.ValueKind == JsonValueKind.Object
+            && TryGetPropertyIgnoreCase(node, "data", out var data)
+            && data.ValueKind == JsonValueKind.Array)
+        {
+            return ConvertNodeToSeriesPoints(data);
+        }
+
+        return points;
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement node, string propertyName, out JsonElement value)
+    {
+        value = default;
+        if (node.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var property in node.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static double?[] ComputeRollingAverage(IReadOnlyList<double?> values, int window)
+    {
+        var result = new double?[values.Count];
+        for (var index = 0; index < values.Count; index++)
+        {
+            var start = Math.Max(0, index - window + 1);
+            var windowValues = new List<double>();
+            for (var i = start; i <= index; i++)
+            {
+                if (values[i].HasValue)
+                {
+                    windowValues.Add(values[i]!.Value);
+                }
+            }
+
+            result[index] = windowValues.Count == 0 ? null : Math.Round(windowValues.Average(), 2);
+        }
+
+        return result;
+    }
+
+    private static double?[] ComputeRollingStandardDeviation(IReadOnlyList<double?> values, int window)
+    {
+        var result = new double?[values.Count];
+        for (var index = 0; index < values.Count; index++)
+        {
+            var start = Math.Max(0, index - window + 1);
+            var windowValues = new List<double>();
+            for (var i = start; i <= index; i++)
+            {
+                if (values[i].HasValue)
+                {
+                    windowValues.Add(values[i]!.Value);
+                }
+            }
+
+            result[index] = windowValues.Count < 2 ? null : Math.Round(StandardDeviation(windowValues), 2);
+        }
+
+        return result;
+    }
+
+    private static double StandardDeviation(IReadOnlyList<double> values)
+    {
+        if (values.Count < 2)
+        {
+            return 0;
+        }
+
+        var mean = values.Average();
+        var variance = values.Sum(x => Math.Pow(x - mean, 2)) / values.Count;
+        return Math.Sqrt(Math.Max(variance, 0));
+    }
+
+    private static bool TryExtractRestingHeartRate(string rawJson, out int restingHeartRate)
+    {
+        restingHeartRate = default;
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var root = document.RootElement;
+            var candidates = new[]
+            {
+                "restingHeartRate",
+                "restingHeartRateInBeatsPerMinute",
+                "resting_heart_rate",
+                "rhr",
+                "avgRestingHeartRate"
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (TryReadIntProperty(root, candidate, out restingHeartRate) && restingHeartRate is > 20 and < 220)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static (DateTimeOffset? Bedtime, DateTimeOffset? WakeTime) ExtractSleepSchedule(string rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var root = document.RootElement;
+            var bedtime =
+                TryReadTimestamp(root, "sleepStartTimestampLocal")
+                ?? TryReadTimestamp(root, "sleepStartTimestampGMT")
+                ?? TryReadTimestamp(root, "bedtime")
+                ?? TryReadTimestamp(root, "sleepStartTime");
+            var wakeTime =
+                TryReadTimestamp(root, "sleepEndTimestampLocal")
+                ?? TryReadTimestamp(root, "sleepEndTimestampGMT")
+                ?? TryReadTimestamp(root, "wakeTime")
+                ?? TryReadTimestamp(root, "sleepEndTime");
+
+            return (bedtime, wakeTime);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private static bool TryReadIntProperty(JsonElement node, string propertyName, out int value)
+    {
+        value = default;
+
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in node.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase)
+                    && TryReadInt(property.Value, out value))
+                {
+                    return true;
+                }
+
+                if (TryReadIntProperty(property.Value, propertyName, out value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in node.EnumerateArray())
+            {
+                if (TryReadIntProperty(item, propertyName, out value))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryReadInt(JsonElement valueNode, out int value)
+    {
+        value = default;
+
+        return valueNode.ValueKind switch
+        {
+            JsonValueKind.Number when valueNode.TryGetInt32(out value) => true,
+            JsonValueKind.Number when valueNode.TryGetDouble(out var asDouble) => TryConvertDoubleToInt(asDouble, out value),
+            JsonValueKind.String when int.TryParse(valueNode.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value) => true,
+            _ => false
+        };
+    }
+
+    private static DateTimeOffset? TryReadTimestamp(JsonElement node, string propertyName)
+    {
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in node.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var timestamp = ParseTimestampValue(property.Value);
+                    if (timestamp.HasValue)
+                    {
+                        return timestamp;
+                    }
+                }
+
+                var nested = TryReadTimestamp(property.Value, propertyName);
+                if (nested.HasValue)
+                {
+                    return nested;
+                }
+            }
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in node.EnumerateArray())
+            {
+                var nested = TryReadTimestamp(item, propertyName);
+                if (nested.HasValue)
+                {
+                    return nested;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static DateTimeOffset? ParseTimestampValue(JsonElement node)
+    {
+        if (node.ValueKind == JsonValueKind.Number)
+        {
+            if (!node.TryGetInt64(out var numeric))
+            {
+                return null;
+            }
+
+            return Math.Abs(numeric) > 20_000_000_000
+                ? DateTimeOffset.FromUnixTimeMilliseconds(numeric)
+                : DateTimeOffset.FromUnixTimeSeconds(numeric);
+        }
+
+        if (node.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var raw = node.GetString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var asLong))
+        {
+            return Math.Abs(asLong) > 20_000_000_000
+                ? DateTimeOffset.FromUnixTimeMilliseconds(asLong)
+                : DateTimeOffset.FromUnixTimeSeconds(asLong);
+        }
+
+        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var asOffset))
+        {
+            return asOffset;
+        }
+
+        return null;
+    }
+
+    private static bool TryConvertDoubleToInt(double input, out int value)
+    {
+        if (input < int.MinValue || input > int.MaxValue)
+        {
+            value = default;
+            return false;
+        }
+
+        value = (int)Math.Round(input);
+        return true;
+    }
+
+    private static DateOnly ResolveTargetMonth(HttpRequest request)
+    {
+        var monthRaw = request.Query["month"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(monthRaw)
+            && DateOnly.TryParseExact(monthRaw + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var month))
+        {
+            return month;
+        }
+
+        var now = DateTime.UtcNow;
+        return new DateOnly(now.Year, now.Month, 1);
+    }
+
+    private static MonthlyLifeSnapshot BuildMonthlyLifeSnapshot(
+        DateOnly fromDay,
+        DateOnly toDay,
+        IReadOnlyList<ActivityRecord> activities,
+        IReadOnlyList<DailyStepsRecord> steps,
+        IReadOnlyList<SleepSummaryRecord> sleep)
+    {
+        var activityByMonth = activities
+            .Where(x => DateOnly.FromDateTime(x.StartTime.UtcDateTime) >= fromDay && DateOnly.FromDateTime(x.StartTime.UtcDateTime) <= toDay)
+            .ToArray();
+        var stepsByMonth = steps.Where(x => x.Day >= fromDay && x.Day <= toDay).ToArray();
+        var sleepByMonth = sleep.Where(x => x.Day >= fromDay && x.Day <= toDay).ToArray();
+
+        var restingHeartRateValues = stepsByMonth
+            .Select(step => TryExtractRestingHeartRate(step.RawJson, out var rhr) ? (double?)rhr : null)
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .ToArray();
+
+        var totalSleep = sleepByMonth.Sum(x => x.SleepHours);
+        var totalDeep = sleepByMonth.Sum(x => x.DeepSleepHours);
+        var groupedSteps = stepsByMonth.GroupBy(x => x.Day).Select(g => g.Max(x => x.TotalSteps)).ToArray();
+        var durations = activityByMonth.Select(GetEffectiveDurationMinutes).ToArray();
+        var longestByDistance = activityByMonth
+            .Where(x => x.DistanceKm.HasValue)
+            .OrderByDescending(x => x.DistanceKm)
+            .FirstOrDefault();
+        var longestByDuration = activityByMonth
+            .OrderByDescending(GetEffectiveDurationMinutes)
+            .FirstOrDefault();
+
+        var longestScore = Math.Max(
+            longestByDistance?.DistanceKm ?? 0,
+            longestByDuration is null ? 0 : GetEffectiveDurationMinutes(longestByDuration));
+        var longestLabel = longestByDistance is not null && (longestByDistance.DistanceKm ?? 0) >= (longestByDuration is null ? 0 : GetEffectiveDurationMinutes(longestByDuration))
+            ? $"{longestByDistance.DistanceKm:0.0} km"
+            : longestByDuration is null
+                ? "-"
+                : FormatDurationForSummary(GetEffectiveDurationMinutes(longestByDuration));
+
+        return new MonthlyLifeSnapshot(
+            AvgRestingHr: restingHeartRateValues.Length == 0 ? null : Math.Round(restingHeartRateValues.Average(), 1),
+            AvgSleepHours: sleepByMonth.Length == 0 ? null : Math.Round(sleepByMonth.Average(x => x.SleepHours), 2),
+            AvgDeepSleepPct: totalSleep <= 0 ? null : Math.Round((totalDeep / totalSleep) * 100, 1),
+            TotalSteps: groupedSteps.Sum(),
+            TotalActiveMinutes: Math.Round(durations.Sum(), 1),
+            LongestActivityLabel: longestLabel,
+            LongestActivityScore: Math.Round(longestScore, 2),
+            ActiveDays: activityByMonth.Select(x => DateOnly.FromDateTime(x.StartTime.UtcDateTime)).Distinct().Count());
+    }
+
+    private static double? ComputeDelta(double? current, double? previous)
+    {
+        if (!current.HasValue || !previous.HasValue)
+        {
+            return null;
+        }
+
+        return Math.Round(current.Value - previous.Value, 2);
+    }
+
+    private static double ComputeDelta(double current, double previous)
+    {
+        return Math.Round(current - previous, 2);
+    }
+
+    private static int ComputeDelta(int current, int previous)
+    {
+        return current - previous;
+    }
+
+    private static string FormatDurationForSummary(double totalMinutes)
+    {
+        var rounded = Math.Max(0, (int)Math.Round(totalMinutes));
+        if (rounded >= 60)
+        {
+            var hours = rounded / 60;
+            var minutes = rounded % 60;
+            return minutes > 0 ? $"{hours}h {minutes}m" : $"{hours}h";
+        }
+
+        return $"{rounded}m";
+    }
+
+    private static readonly object[] DailyMetricOptions =
+    [
+        new { key = "activeMinutes", label = "Active minutes" },
+        new { key = "activeCalories", label = "Active calories" },
+        new { key = "steps", label = "Steps" },
+        new { key = "sleepHours", label = "Total sleep hours" },
+        new { key = "sleepEfficiency", label = "Sleep efficiency" },
+        new { key = "restingHr", label = "Resting heart rate" },
+        new { key = "deepSleepMinutes", label = "Deep sleep minutes" }
+    ];
+
+    private sealed record DateRange(DateOnly FromDay, DateOnly ToDay);
+
+    private sealed record DailyMetricSnapshot(
+        DateOnly Day,
+        double? ActiveMinutes,
+        double? ActiveCalories,
+        double? Steps,
+        double? SleepHours,
+        double? SleepEfficiency,
+        double? RestingHr,
+        double? DeepSleepMinutes);
+
+    private sealed record CorrelationPoint(DateOnly Day, DateOnly CompareDay, double X, double Y);
+
+    private sealed record WeeklyActivityTypeLoad(string Type, double DurationMinutes, double DistanceKm, double Calories, double Load);
+
+    private sealed record WeeklyLoadPoint(
+        DateOnly WeekStart,
+        string WeekKey,
+        double TotalDurationMinutes,
+        double TotalDistanceKm,
+        double TotalCalories,
+        double TotalLoad,
+        IReadOnlyList<WeeklyActivityTypeLoad> ByType,
+        double? TrailingAverageDuration,
+        bool SpikeWarning,
+        bool DetrainingWarning);
+
+    private sealed record HrZoneSeconds(double Zone1Seconds, double Zone2Seconds, double Zone3Seconds, double Zone4Seconds, double Zone5Seconds)
+    {
+        public double TotalSeconds => Zone1Seconds + Zone2Seconds + Zone3Seconds + Zone4Seconds + Zone5Seconds;
+    }
+
+    private sealed record MinuteValuePoint(int Minute, double Value);
+
+    private sealed record MonthlyLifeSnapshot(
+        double? AvgRestingHr,
+        double? AvgSleepHours,
+        double? AvgDeepSleepPct,
+        int TotalSteps,
+        double TotalActiveMinutes,
+        string LongestActivityLabel,
+        double LongestActivityScore,
+        int ActiveDays);
 }
